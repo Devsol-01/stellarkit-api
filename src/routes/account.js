@@ -3,6 +3,7 @@ const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
+const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
 
 /**
  * GET /account/:id
@@ -110,6 +111,86 @@ router.get("/:id/summary", async (req, res, next) => {
         claimableResult.status === "fulfilled"
           ? claimableResult.value.records
           : [],
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /account/:id/trustlines
+ * Returns all trustlines for an account with asset metadata resolved from issuer's stellar.toml.
+ *
+ * For each asset (non-native balance):
+ * - Resolves issuer home_domain
+ * - Fetches stellar.toml from the issuer's domain
+ * - Extracts name, description, and image for the asset if available
+ * - Gracefully handles missing or unreachable TOML files
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trustlines
+ */
+router.get("/:id/trustlines", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    // Get all trustlines (non-native balances)
+    const trustlines = account.balances
+      .filter((b) => b.asset_type !== "native")
+      .map((b) => ({
+        assetCode: b.asset_code,
+        assetIssuer: b.asset_issuer,
+        assetType: b.asset_type,
+        balance: b.balance,
+        limit: b.limit,
+        buyingLiabilities: b.buying_liabilities,
+        sellingLiabilities: b.selling_liabilities,
+        isAuthorized: b.is_authorized,
+        isClawbackEnabled: b.is_clawback_enabled,
+      }));
+
+    // Fetch issuer info and TOML metadata for each trustline
+    const trustlinesWithMetadata = await Promise.all(
+      trustlines.map(async (trustline) => {
+        let issuerInfo = null;
+        let tomlMetadata = null;
+
+        try {
+          const issuerAccount = await server.loadAccount(trustline.assetIssuer);
+          issuerInfo = {
+            homeDomain: issuerAccount.home_domain || null,
+            flags: issuerAccount.flags,
+            thresholds: issuerAccount.thresholds,
+          };
+
+          // If issuer has a home_domain, fetch TOML metadata
+          if (issuerAccount.home_domain) {
+            tomlMetadata = await getAssetMetadataFromToml(
+              issuerAccount.home_domain,
+              trustline.assetCode
+            );
+          }
+        } catch (_) {
+          // Issuer account info and TOML are optional; continue if unreachable
+        }
+
+        return {
+          ...trustline,
+          issuer: issuerInfo,
+          metadata: tomlMetadata,
+        };
+      })
+    );
+
+    return success(res, {
+      accountId: account.id,
+      trustlineCount: trustlinesWithMetadata.length,
+      trustlines: trustlinesWithMetadata,
     });
   } catch (err) {
     next(err);
