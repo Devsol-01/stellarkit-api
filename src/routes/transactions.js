@@ -19,6 +19,51 @@ const { validateAccountId, validateLimit } = require("../utils/validators");
  * GET /transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN
  * GET /transactions/GAAZI4...?limit=5&order=asc
  */
+
+/**
+ * Handler to fetch paginated transaction history for a Stellar account.
+ *
+ * @async
+ * @function
+ * @param {import("express").Request} req - Express request object
+ * @param {Object} req.params - Route parameters
+ * @param {string} req.params.id - Stellar account public key (G...)
+ * @param {Object} req.query - Query parameters
+ * @param {string|number} [req.query.limit=10] - Number of records to return (max 200)
+ * @param {string} [req.query.cursor] - Pagination cursor
+ * @param {"asc"|"desc"} [req.query.order="desc"] - Sort order
+ * @param {import("express").Response} res - Express response object
+ * @param {import("express").NextFunction} next - Express next middleware function
+ *
+ * @returns {Promise<void>} Sends a JSON response:
+ * {
+ *   data: Array<{
+ *     id: string,
+ *     hash: string,
+ *     ledger: number,
+ *     createdAt: string,
+ *     sourceAccount: string,
+ *     fee: {
+ *       charged: string,
+ *       account: string
+ *     },
+ *     operationCount: number,
+ *     memoType: string,
+ *     memo: string | null,
+ *     successful: boolean,
+ *     envelopeXdr: string
+ *   }>,
+ *   meta: {
+ *     count: number,
+ *     limit: number,
+ *     order: "asc" | "desc",
+ *     nextCursor: string | null,
+ *     hasMore: boolean
+ *   }
+ * }
+ *
+ * @throws Will pass validation or network errors to next middleware
+ */
 router.get("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -58,7 +103,6 @@ router.get("/:id", async (req, res, next) => {
       envelopeXdr: tx.envelope_xdr,
     }));
 
-    // Extract cursor for next page
     const lastRecord = txResponse.records[txResponse.records.length - 1];
     const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
@@ -87,6 +131,45 @@ router.get("/:id", async (req, res, next) => {
  *
  * @example
  * GET /transactions/GAAZI4.../operations?limit=20
+ */
+
+/**
+ * Handler to fetch operations for a Stellar account.
+ *
+ * @async
+ * @function
+ * @param {import("express").Request} req - Express request object
+ * @param {Object} req.params - Route parameters
+ * @param {string} req.params.id - Stellar account public key (G...)
+ * @param {Object} req.query - Query parameters
+ * @param {string|number} [req.query.limit=10] - Number of records to return (max 200)
+ * @param {string} [req.query.cursor] - Pagination cursor
+ * @param {"asc"|"desc"} [req.query.order="desc"] - Sort order
+ * @param {import("express").Response} res - Express response object
+ * @param {import("express").NextFunction} next - Express next middleware function
+ *
+ * @returns {Promise<void>} Sends a JSON response:
+ * {
+ *   data: Array<{
+ *     id: string,
+ *     type: string,
+ *     createdAt: string,
+ *     transactionHash: string,
+ *     transactionSuccessful: boolean,
+ *     sourceAccount: string,
+ *     // Additional fields vary by operation type:
+ *     // payment | create_account | change_trust | others
+ *   }>,
+ *   meta: {
+ *     count: number,
+ *     limit: number,
+ *     order: "asc" | "desc",
+ *     nextCursor: string | null,
+ *     hasMore: boolean
+ *   }
+ * }
+ *
+ * @throws Will pass validation or network errors to next middleware
  */
 router.get("/:id/operations", async (req, res, next) => {
   try {
@@ -119,7 +202,6 @@ router.get("/:id/operations", async (req, res, next) => {
         sourceAccount: op.source_account,
       };
 
-      // Add type-specific fields
       switch (op.type) {
         case "payment":
           return {
