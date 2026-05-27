@@ -1,9 +1,7 @@
-# TODO - seed-testnet (Friendbot)
+# TODO
 
-- [x] Inspect repository structure and existing scripts
-- [x] Create `scripts/seed-testnet.js` (generate keypair + fund via Friendbot + print keys)
-- [x] Add `seed` script to `package.json`
-- [x] Document usage under README → “Development”
-- [x] Run `npm run seed` to sanity check
+- [x] Add `lint:fix` script to `package.json`.
+- [x] Document `npm run lint:fix` in `CONTRIBUTING.md`.
+- [ ] Verify scripts/lint command works (optional: run `npm run lint`/`npm run lint:fix` in CI-safe way).
 
 

@@ -8,6 +8,8 @@
     "dev": "nodemon src/index.js",
     "test": "jest --coverage",
     "lint": "eslint src/**/*.js",
+    "lint:fix": "eslint src/**/*.js --fix",
+
     "seed": "node scripts/seed-testnet.js"
   },
   "keywords": [

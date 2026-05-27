@@ -63,7 +63,9 @@ npm run dev
 This project uses ESLint with `eslint:recommended` rules.
 
 - Run: `npm run lint`
+- To auto-fix issues: `npm run lint:fix`
 - Expected: lint should pass with no errors before opening a PR.
+
 
 
 ---
