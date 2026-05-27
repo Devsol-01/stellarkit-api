@@ -15,6 +15,7 @@ const feeEstimateRouter = require("./routes/feeEstimate");
 const accountRouter = require("./routes/account");
 const transactionsRouter = require("./routes/transactions");
 const assetRouter = require("./routes/asset");
+const streamRouter = require("./routes/stream");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -49,6 +50,7 @@ app.use("/fee-estimate", feeEstimateRouter);
 app.use("/account", accountRouter);
 app.use("/transactions", transactionsRouter);
 app.use("/asset", assetRouter);
+app.use("/stream", streamRouter);
 
 // ── Root ─────────────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
