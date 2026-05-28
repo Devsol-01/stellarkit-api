@@ -5,6 +5,7 @@ const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
 
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
+const { decodeMemo } = require("../utils/memo");
 
 /**
  * GET /utils/friendbot/:accountId
@@ -62,6 +63,25 @@ router.get("/friendbot/:accountId", async (req, res, next) => {
 
     // Pass other errors to global handler
     next(err);
+  }
+});
+
+/**
+ * GET /utils/memo?type={type}&value={value}
+ * Decode a raw Horizon memo into a human-friendly representation.
+ */
+router.get("/memo", (req, res, next) => {
+  try {
+    const { type, value } = req.query;
+    const result = decodeMemo(type, value);
+    return success(res, result);
+  } catch (err) {
+    if (!err.isValidation) {
+      // Unexpected error - forward to global handler
+      return next(err);
+    }
+    err.isValidation = true;
+    return next(err);
   }
 });
 
