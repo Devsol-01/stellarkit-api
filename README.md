@@ -196,6 +196,18 @@ Searches for assets by code and returns matching results, including issuer detai
 
 ---
 
+## Understanding Stellar Fees
+
+Stellar fees are paid in tiny units of XLM called stroops. One XLM equals 10,000,000 stroops, so a fee of 100 stroops is 0.0000100 XLM. Horizon and the Stellar protocol often report fees in stroops because they are exact integers, while wallets and user interfaces usually display the same value as XLM.
+
+Every transaction starts with a base fee per operation. If a transaction contains three operations and the base fee is 100 stroops, the minimum fee is 300 stroops. When the network has spare capacity, transactions that pay the base fee are usually enough. When many transactions are competing for ledger space, Stellar uses surge pricing: transactions that offer higher fees are more likely to be included first.
+
+Capacity usage is the practical signal to watch. Low usage means an economy fee can keep costs minimal. Moderate usage is a good time to choose the standard tier for a stronger chance of timely inclusion. High usage or time-sensitive flows, such as checkout, swaps, or account setup, may need the priority tier so the transaction competes better during surge pricing.
+
+Use the `GET /fee-estimate` endpoint before submitting transactions. It returns economy, standard, and priority fee tiers in both stroops and XLM, already multiplied by the requested operation count, so clients can choose the lowest fee that still fits their urgency.
+
+---
+
 ## TypeScript Support
 
 This repository publishes type declarations in `types/index.d.ts`. Use these types to make your client integration type-safe.
