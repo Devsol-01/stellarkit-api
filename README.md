@@ -52,6 +52,7 @@ This project is ideal for:
 | GET | `/account/:id/sequence` | Retrieves the account sequence number |
 | GET | `/account/:id/summary` | Retrieves a compact account summary |
 | GET | `/account/:id/payments` | Lists payment and create_account operations |
+| GET | `/account/:id/sponsorship` | Returns sponsorship relationships for the account (sponsor id and sponsored ledger entries) |
 | GET | `/transactions/:id` | Retrieves paginated transaction history |
 | GET | `/transactions/:id/operations` | Retrieves paginated operation history |
 | GET | `/asset/:code/:issuer` | Retrieves metadata and statistics for an asset |
@@ -353,6 +354,21 @@ GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN
     "assets": [...],
     "signers": [...],
     "flags": {...}
+
+### Understanding Account Sponsorship
+
+Account sponsorship in Stellar allows one account (the sponsor) to cover the base reserve and associated subentry reserves for ledger entries owned or created for another account. Sponsorship makes it possible for custodial services, marketplaces, or onboarding flows to pay ledger costs on behalf of users while sponsorship is active.
+
+- What it means: sponsorship ties specific ledger entries (accounts, trustlines, signers, data entries, offers, claimable balances, etc.) to a sponsoring account that pays the associated reserve while the sponsorship exists.
+- Sponsored reserves: while sponsorship is active, the sponsor is responsible for the base reserve required by those sponsored ledger entries. If sponsorship ends, the sponsored account must meet the reserve requirements itself or the network may require cleanup or disallow some entries.
+- Why it exists: to simplify onboarding, reduce friction for new users, and enable managed services to cover ledger costs temporarily or indefinitely.
+
+Using this API:
+
+- Inspect sponsorship relationships using `GET /account/:id/sponsorship`. This endpoint helps determine whether an account or its ledger entries are sponsored, who the sponsor is, and which entries are covered — useful for UI indicators, billing reconciliation, or migration workflows.
+
+Note: This repository documents the sponsorship inspection endpoint; it does not change any runtime behavior or add sponsorship logic.
+
   }
 }
 ```
