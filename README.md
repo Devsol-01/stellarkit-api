@@ -4,32 +4,55 @@
   <b>English 🇺🇸</b> | <a href="README.fr.md">Français 🇫🇷</a> | <a href="README.es.md">Español 🇪🇸</a>
 </p>
 
-> A developer utility REST API for the Stellar blockchain — built with Express.js and the official Stellar SDK.
+> StellarKit API is a developer utility service that exposes the Stellar Horizon blockchain through a simple REST interface. It is designed for application developers who need fast, typed access to account details, fee estimates, transaction history, network health, and asset metadata.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
 [![Stellar](https://img.shields.io/badge/Stellar-SDK-blue)](https://stellar.org)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![Security Audit](https://github.com/stellarkit-lab-devtools/stellarkit-api/actions/workflows/ci.yml/badge.svg?label=security)](https://github.com/stellarkit-lab-devtools/stellarkit-api/actions/workflows/ci.yml)
-
-StellarKit API wraps the [Stellar Horizon API](https://developers.stellar.org/api/horizon) into clean, developer-friendly REST endpoints. It helps developers building on Stellar quickly access fee estimates, account data, transaction history, network status, and asset metadata — without having to read through raw Horizon responses.
 
 ---
 
-## ✨ Features
+## What is StellarKit API?
 
-- 📊 **Network Status** — Latest ledger info, base fee, protocol version
-- 💸 **Fee Estimation** — Economy / Standard / Priority fee tiers for any operation count
-- 👤 **Account Info** — Balances (XLM + all assets), signers, thresholds, spendable balance
-- 📜 **Transaction History** — Paginated transactions and operations per account
-- 🪙 **Asset Metadata** — Stats for any Stellar asset, plus multi-issuer search
-- 🛡️ **Production-ready** — Rate limiting, helmet security headers, centralised error handling
-- ✅ **Tested** — Jest test suite with coverage
+StellarKit API is a wrapper around the Stellar Horizon API, built with Express.js and the official `@stellar/stellar-sdk` library. It normalizes Horizon responses, provides a clean REST structure, and adds convenience endpoints for the most common Stellar developer workflows.
+
+This project is ideal for:
+
+- Web and mobile developers building on Stellar
+- Server-side services consuming Stellar account and transaction data
+- Wallet providers that need reliable fee estimation and account summaries
+- Applications requiring typed API responses via bundled TypeScript definitions
 
 ---
 
-## 🚀 Getting Started
+## Key Features
 
+- 🌐 **Network status and ledger health**
+- 💰 **Dynamic fee estimation** for optimal transaction pricing
+- 👥 **Account detail aggregation** including balances, signers, and thresholds
+- 📜 **Paginated transaction history** and operation history per account
+- 🪙 **Asset metadata search** and issuer lookup
+- 🚫 **Built-in security middleware** with rate limiting, helmet headers, CORS, and HPP
+- 🧪 **Test coverage** using Jest and Supertest
+- 📦 **Bundled TypeScript types** for safe integration in TypeScript projects
+
+---
+
+## Project Structure
+
+- `src/index.js` — application entry point
+- `src/websocket.js` — WebSocket helper for Stellar streaming data
+- `src/config/stellar.js` — Stellar network configuration
+- `src/routes/` — Express route handlers for API endpoints
+- `src/utils/` — shared helpers for formatting, validation, caching, response shaping
+- `src/middleware/` — validation, error handling, rate limiting
+- `tests/` — API and integration tests
+- `types/index.d.ts` — exported TypeScript type definitions
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
@@ -42,150 +65,78 @@ StellarKit API wraps the [Stellar Horizon API](https://developers.stellar.org/ap
 git clone https://github.com/stellarkit-lab-devtools/stellarkit-api.git
 cd stellarkit-api
 npm install
-cp .env.example .env
+copy .env.example .env
 ```
 
 ### Configuration
 
-Edit `.env`:
+Open `.env` and configure your environment variables:
 
 ```env
-STELLAR_NETWORK=testnet     # or "mainnet"
+STELLAR_NETWORK=testnet
 PORT=3000
 ```
 
-### Run
+Supported values for `STELLAR_NETWORK` are `testnet` and `mainnet`.
+
+### Run the API
 
 ```bash
-# Development (auto-reload)
+# Development with auto-reload
 npm run dev
 
 # Production
 npm start
 ```
 
-The API will be available at `http://localhost:3000`.
+Visit `http://localhost:3000` after startup.
 
 ---
 
-## 📘 TypeScript Support
-
-`stellarkit-api` ships with full TypeScript type definitions. All response shapes are typed and exported from `types/index.d.ts`.
-
-### Installation
-
-Types are included automatically — no `@types/` package needed.
-
-### Usage
-
-```typescript
-import type {
-  AccountResponse,
-  TransactionHistoryResponse,
-  OperationHistoryResponse,
-  FeeEstimateResponse,
-  NetworkStatusResponse,
-  AssetResponse,
-  AssetSearchResponse,
-  AccountBalancesResponse,
-  AccountPaymentsResponse,
-  AccountSummaryResponse,
-  ApiError,
-} from 'stellarkit-api'
-
-// Example: typed API response
-const response: AccountResponse = await fetch(
-  'http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN'
-).then(r => r.json())
-
-// Fully typed access to response fields
-console.log(response.data.xlm.balance)
-console.log(response.data.assets[0].assetCode)
-```
-
-### Available Types
-
-| Type | Description |
-|------|-------------|
-| `AccountResponse` | Response from GET /account/:id |
-| `AccountBalancesResponse` | Response from GET /account/:id/balances |
-| `AccountSummaryResponse` | Response from GET /account/:id/summary |
-| `AccountPaymentsResponse` | Response from GET /account/:id/payments |
-| `TransactionHistoryResponse` | Response from GET /transactions/:id |
-| `OperationHistoryResponse` | Response from GET /transactions/:id/operations |
-| `FeeEstimateResponse` | Response from GET /fee-estimate |
-| `NetworkStatusResponse` | Response from GET /network-status |
-| `AssetResponse` | Response from GET /asset/:code/:issuer |
-| `AssetSearchResponse` | Response from GET /asset/search?code=:code |
-| `HealthResponse` | Response from GET /health |
-| `ApiError` | Standard error response shape |
-| `StellarPublicKey` | Stellar public key type alias |
-| `TransactionHash` | Transaction hash type alias |
-| `ISOTimestamp` | ISO 8601 timestamp type alias |
-| `StellarAmount` | Stellar amount (string) type alias |
-| `StellarAsset` | Stellar asset identifier |
-| `AccountBalances` | Account balances wrapper |
-| `XLMBalance` | XLM balance information |
-| `AssetBalance` | Non-native asset balance |
-| `Signer` | Signer information |
-| `Thresholds` | Account thresholds |
-| `AccountFlags` | Account flags |
-| `FeeTier` | Fee tier information |
-| `LedgerInfo` | Ledger information |
-| `TransactionRecord` | Transaction record |
-| `OperationRecord` | Operation record |
-| `PaginationMeta` | Pagination metadata |
-
-### Type-Safe Error Handling
-
-```typescript
-import type { ApiError } from 'stellarkit-api'
-
-try {
-  const response = await fetch('http://localhost:3000/account/invalid-key')
-  const data = await response.json()
-  
-  if (!response.ok) {
-    const error = data as ApiError
-    console.error(error.error.type, error.error.message)
-  }
-} catch (err) {
-  console.error('Network error:', err)
-}
-```
-
-### Query Parameter Types
-
-For endpoints that accept query parameters, use the corresponding `Params` types:
-
-```typescript
-import type { FeeEstimateParams, TransactionHistoryParams } from 'stellarkit-api'
-
-const feeParams: FeeEstimateParams = {
-  operations: 3,
-  fresh: true,
-}
-
-const txParams: TransactionHistoryParams = {
-  limit: 20,
-  order: 'asc',
-  cursor: 'paging-token-here',
-}
-```
-
----
-
-## 📡 API Endpoints
+## API Overview
 
 ### `GET /`
-Returns the full list of available endpoints.
+Returns a list of available API endpoints and a brief description.
+
+### `GET /health`
+Returns basic service health status.
+
+### `GET /network-status`
+Returns current Stellar network information, latest ledger data, fee settings, and protocol version.
+
+### `GET /fee-estimate`
+Calculates a fee estimate for a transaction using the current network base fee and requested operation count.
+
+### `GET /account/:id`
+Fetches account details, balances, signers, thresholds, flags, and spendable balance for the given Stellar public key.
+
+### `GET /account/:id/balances`
+Returns account balance details for XLM and all non-native assets.
+
+### `GET /account/:id/summary`
+Returns a compact account summary suitable for dashboards and quick views.
+
+### `GET /account/:id/payments`
+Lists payments and asset transfers for the account.
+
+### `GET /transactions/:id`
+Retrieves transaction history for an account, with pagination.
+
+### `GET /transactions/:id/operations`
+Retrieves operation history for an account, with pagination.
+
+### `GET /asset/:code/:issuer`
+Returns metadata and statistics for a specific Stellar asset.
+
+### `GET /asset/search?code=:code`
+Searches for assets by code and returns matching results, including issuer details.
 
 ---
 
-### `GET /health`
-Service health check.
+## Example Responses
 
-**Response:**
+### Health
+
 ```json
 {
   "success": true,
@@ -198,12 +149,8 @@ Service health check.
 }
 ```
 
----
+### Network Status
 
-### `GET /network-status`
-Returns the latest ledger info, fees, and protocol version.
-
-**Response:**
 ```json
 {
   "success": true,
@@ -219,45 +166,92 @@ Returns the latest ledger info, fees, and protocol version.
       "baseFeeInStroops": 100,
       "baseFeeInXLM": "0.0000100"
     },
-    "protocol": { "version": 21 }
+    "protocol": {
+      "version": 21
+    }
   }
 }
 ```
 
----
+### Fee Estimate
 
-### `GET /fee-estimate`
-Returns Economy / Standard / Priority fee tiers based on live network stats.
-
-**Query params:**
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | number | `1` | Number of operations in your transaction |
-
-**Example:**
-```
-GET /fee-estimate?operations=3
-```
-
-**Response:**
 ```json
 {
   "success": true,
   "data": {
     "operationCount": 3,
     "perOperation": {
-      "economy":  { "stroops": 100, "xlm": "0.0000100" },
+      "economy": { "stroops": 100, "xlm": "0.0000100" },
       "standard": { "stroops": 200, "xlm": "0.0000200" },
       "priority": { "stroops": 500, "xlm": "0.0000500" }
     },
     "totalFee": {
-      "economy":  { "stroops": 300, "xlm": "0.0000300" },
+      "economy": { "stroops": 300, "xlm": "0.0000300" },
       "standard": { "stroops": 600, "xlm": "0.0000600" },
       "priority": { "stroops": 1500, "xlm": "0.0001500" }
     }
   }
 }
 ```
+
+---
+
+## TypeScript Support
+
+This repository publishes type declarations in `types/index.d.ts`. Use these types to make your client integration type-safe.
+
+### Example
+
+```typescript
+import type { AccountResponse, ApiError } from 'stellarkit-api'
+
+async function loadAccount(accountId: string) {
+  const response = await fetch(`http://localhost:3000/account/${accountId}`)
+  const payload = await response.json()
+
+  if (!response.ok) {
+    const error = payload as ApiError
+    throw new Error(error.error.message)
+  }
+
+  return payload as AccountResponse
+}
+```
+
+---
+
+## Development
+
+### Run tests
+
+```bash
+npm test
+```
+
+### Lint
+
+```bash
+npm run lint
+npm run lint:fix
+```
+
+### Seed testnet data
+
+```bash
+npm run seed
+```
+
+---
+
+## Contributing
+
+Contributions are welcome! See `CONTRIBUTING.md` for guidelines on pull requests, issue reporting, and code style.
+
+---
+
+## License
+
+This project is licensed under the MIT License.
 
 ---
 
