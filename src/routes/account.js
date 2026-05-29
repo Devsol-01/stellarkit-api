@@ -371,6 +371,216 @@ router.get("/:id/sequence", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /account/:id/inactivity
+ * Detects how long a Stellar account has been inactive by analyzing its most recent transaction.
+ *
+ * Returns inactivity details including the timestamp of the last transaction,
+ * its hash, the number of days since it occurred, and a status:
+ * - "active" (< 30 days)
+ * - "idle" (30–180 days)
+ * - "dormant" (> 180 days)
+ *
+ * If no transactions are found, returns { status: "no_transactions" }.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/inactivity
+ */
+router.get("/:id/inactivity", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Fetch the most recent transaction for the account
+    const txResponse = await server
+      .transactions()
+      .forAccount(id)
+      .order("desc")
+      .limit(1)
+      .call();
+
+    if (txResponse.records.length === 0) {
+      return success(res, { status: "no_transactions" });
+    }
+
+    const lastTx = txResponse.records[0];
+    const lastTransactionAt = lastTx.created_at;
+    const lastTransactionHash = lastTx.hash;
+
+    const lastTxDate = new Date(lastTransactionAt);
+    const now = new Date();
+    const diffInMs = now - lastTxDate;
+    const daysSinceLastTransaction = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    let status;
+    if (daysSinceLastTransaction < 30) {
+      status = "active";
+    } else if (daysSinceLastTransaction <= 180) {
+      status = "idle";
+    } else {
+      status = "dormant";
+    }
+
+    return success(res, {
+      lastTransactionAt,
+      lastTransactionHash,
+      daysSinceLastTransaction,
+      status,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/sponsorship
+ * Resolves the full sponsorship structure of a Stellar account.
+ *
+ * Returns:
+ * - accountSponsor: The account sponsoring the queried account's existence.
+ * - sponsoredEntries: List of subentries (trustlines, offers, data, etc.) sponsored by others.
+ * - accountsSponsoring: List of other accounts that the queried account is currently sponsoring.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sponsorship
+ */
+router.get("/:id/sponsorship", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    const sponsoredEntries = [];
+
+    // Check balances (trustlines)
+    account.balances.forEach((b) => {
+      if (b.sponsor) {
+        sponsoredEntries.push({
+          type: "trustline",
+          asset: b.asset_type === "native" ? "XLM" : `${b.asset_code}:${b.asset_issuer}`,
+          sponsor: b.sponsor,
+        });
+      }
+    });
+
+    // Check signers
+    account.signers.forEach((s) => {
+      if (s.sponsor) {
+        sponsoredEntries.push({
+          type: "signer",
+          key: s.key,
+          sponsor: s.sponsor,
+        });
+      }
+    });
+
+    // Check data entries
+    if (account.data_attr) {
+      // In Horizon response, data sponsors are in 'data_sponsors' object
+      const dataSponsors = account.data_sponsors || {};
+      Object.keys(account.data_attr).forEach((key) => {
+        if (dataSponsors[key]) {
+          sponsoredEntries.push({
+            type: "data_entry",
+            key: key,
+            sponsor: dataSponsors[key],
+          });
+        }
+      });
+    }
+
+    // Check for sponsored accounts (accounts where this account is the sponsor)
+    // We can find this by querying accounts where 'sponsor' is this account ID
+    const sponsoringResponse = await server.accounts().sponsor(id).call();
+    const accountsSponsoring = sponsoringResponse.records.map((acc) => acc.id);
+
+    return success(res, {
+      accountId: account.id,
+      accountSponsor: account.sponsor || null,
+      numSponsored: account.num_sponsored || 0,
+      numSponsoring: account.num_sponsoring || 0,
+      sponsoredEntries,
+      accountsSponsoring,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/subentry-health
+ * Analyzes an account's subentry usage and warns when approaching the protocol limit.
+ *
+ * Subentries include trustlines, offers, data entries, and additional signers.
+ * The standard protocol limit is 1000 subentries per account.
+ *
+ * Returns:
+ * - totalSubentries: Current number of subentries.
+ * - maxSubentries: The protocol limit (1000).
+ * - remainingSlots: Number of subentries that can still be added.
+ * - usagePercent: Percentage of limit used.
+ * - warning: "critical" (>95%), "approaching_limit" (>80%), or null.
+ * - breakdown: Count of each subentry type.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/subentry-health
+ */
+router.get("/:id/subentry-health", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    const MAX_SUBENTRIES = 1000;
+    const totalSubentries = account.subentry_count;
+    const remainingSlots = Math.max(0, MAX_SUBENTRIES - totalSubentries);
+    const usagePercent = (totalSubentries / MAX_SUBENTRIES) * 100;
+
+    let warning = null;
+    if (usagePercent > 95) {
+      warning = "critical";
+    } else if (usagePercent > 80) {
+      warning = "approaching_limit";
+    }
+
+    // Breakdown calculation
+    const trustlines = account.balances.filter((b) => b.asset_type !== "native").length;
+    const dataEntries = Object.keys(account.data_attr || {}).length;
+    const additionalSigners = Math.max(0, account.signers.length - 1);
+
+    // Offers are not directly listed in the account object, but they contribute to subentry_count
+    // We can infer them or fetch them. Since we need an accurate breakdown, let's fetch the count.
+    // However, fetching all offers might be expensive. We can estimate:
+    // offers = subentry_count - trustlines - data_entries - signers
+    // Note: Protocol 14+ claimable balances also count if sponsored, but let's stick to the basics first.
+    const inferredOffers = Math.max(0, totalSubentries - trustlines - dataEntries - additionalSigners);
+
+    return success(res, {
+      totalSubentries,
+      maxSubentries: MAX_SUBENTRIES,
+      remainingSlots,
+      usagePercent: parseFloat(usagePercent.toFixed(2)),
+      warning,
+      breakdown: {
+        trustlines,
+        offers: inferredOffers,
+        dataEntries,
+        additionalSigners,
+      },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
 router.get("/:id/summary", accountSummaryRateLimiter, async (req, res, next) => {
   try {
     const { id } = req.params;

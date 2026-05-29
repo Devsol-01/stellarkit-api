@@ -222,4 +222,114 @@ router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /dex/depth/:sellAsset/:buyAsset
+ * Analyzes the full depth of a Stellar DEX order book for a trading pair.
+ *
+ * Returns a summary of bids and asks, total volumes, top 5 of each,
+ * and a depth rating:
+ * - "deep": total volume >= 50,000
+ * - "moderate": total volume >= 5,000
+ * - "shallow": total volume < 5,000
+ *
+ * Asset format: CODE:ISSUER or XLM:native
+ *
+ * @example
+ * GET /dex/depth/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+ */
+router.get("/depth/:sellAsset/:buyAsset", async (req, res, next) => {
+  try {
+    const { sellAsset, buyAsset } = req.params;
+
+    const parseStellarAsset = (assetString) => {
+      const parts = assetString.split(":");
+      if (parts.length !== 2) {
+        throw new Error(`Invalid asset format: "${assetString}". Expected format: CODE:ISSUER`);
+      }
+
+      const [code, issuer] = parts;
+
+      if (code.toUpperCase() === "XLM" && issuer.toLowerCase() === "native") {
+        return Asset.native();
+      }
+
+      validateAssetCode(code);
+      validateAccountId(issuer);
+
+      return new Asset(code.toUpperCase(), issuer);
+    };
+
+    let selling, buying;
+    try {
+      selling = parseStellarAsset(sellAsset);
+      buying = parseStellarAsset(buyAsset);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: err.message,
+        },
+      });
+    }
+
+    const orderBookResponse = await server
+      .orderbook(selling, buying)
+      .limit(200)
+      .call();
+
+    const bids = orderBookResponse.bids || [];
+    const asks = orderBookResponse.asks || [];
+
+    if (bids.length === 0 && asks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "No order book exists for this trading pair.",
+        },
+      });
+    }
+
+    const totalBidVolume = bids.reduce((sum, bid) => sum + parseFloat(bid.amount), 0);
+    const totalAskVolume = asks.reduce((sum, ask) => sum + parseFloat(ask.amount), 0);
+    const totalVolume = totalBidVolume + totalAskVolume;
+
+    let depthRating;
+    if (totalVolume >= 50000) {
+      depthRating = "deep";
+    } else if (totalVolume >= 5000) {
+      depthRating = "moderate";
+    } else {
+      depthRating = "shallow";
+    }
+
+    const formatOrder = (order) => ({
+      price: order.price,
+      amount: order.amount,
+    });
+
+    return success(res, {
+      bidsCount: bids.length,
+      asksCount: asks.length,
+      totalBidVolume: totalBidVolume.toFixed(7),
+      totalAskVolume: totalAskVolume.toFixed(7),
+      top5Bids: bids.slice(0, 5).map(formatOrder),
+      top5Asks: asks.slice(0, 5).map(formatOrder),
+      depthRating,
+    });
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "No order book exists for this trading pair.",
+        },
+      });
+    }
+    next(err);
+  }
+});
+
 module.exports = router;
