@@ -842,6 +842,53 @@ stellarkit-api/
 
 ---
 
+## Understanding the Stellar DEX
+
+The Stellar network includes a built-in decentralized exchange (DEX) that lets anyone trade assets directly on the ledger — no third-party exchange required. Understanding how it works helps you build trading tools, wallets, and payment flows that take full advantage of Stellar's on-chain liquidity.
+
+### Offers, Bids, and Asks
+
+Trading on the Stellar DEX works through **offers** — on-ledger orders that say "I will sell X amount of asset A for Y amount of asset B." Every offer is stored on the ledger and remains open until it is filled, cancelled, or the account no longer has sufficient balance.
+
+The order book for a trading pair is made up of two sides:
+
+- **Bids** — buy orders. These are offers from accounts willing to buy the base asset. The best bid is the highest price a buyer is prepared to pay.
+- **Asks** — sell orders. These are offers from accounts willing to sell the base asset. The best ask is the lowest price a seller will accept.
+
+The difference between the best ask and the best bid is the **spread**. A tight spread signals a liquid, competitive market. A wide spread means fewer participants and potentially worse execution prices.
+
+### Trading Pairs
+
+A trading pair on the Stellar DEX is simply any two assets. Because every asset on Stellar is identified by its code and issuer (e.g., `USDC:GA5Z...`), any two assets can form a pair. Native XLM is represented as `XLM:native`.
+
+There is no central listing process — if two accounts create matching offers for any pair of assets, a market exists. This means the DEX supports thousands of pairs simultaneously, including stablecoins, tokenized commodities, and custom project tokens.
+
+### Path Payments
+
+A **path payment** is a special Stellar operation that lets you send one asset while the recipient receives a different asset. Stellar automatically finds a conversion route through one or more intermediate assets on the DEX, executing the trades atomically in a single transaction.
+
+For example, you can send XLM and have the recipient receive USDC — Stellar handles the swap on-chain. If no direct XLM/USDC market exists, Stellar can route through intermediate assets (e.g., XLM → BTC → USDC) to complete the payment.
+
+Path payments are useful because:
+
+- **Cross-currency payments** — senders and recipients can each hold their preferred asset without needing to share a common currency.
+- **Atomic execution** — the entire conversion and delivery either succeeds completely or fails with no partial state.
+- **Best-rate routing** — Stellar evaluates available paths and selects the one that delivers the most to the recipient for a given source amount (or costs the sender the least for a fixed destination amount).
+- **Arbitrage detection** — circular paths (asset A → ... → asset A) can reveal price inefficiencies across the DEX.
+
+### DEX Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /dex/spread/:sellAsset/:buyAsset` | Fetches the live order book for a trading pair and returns the best bid, best ask, spread, mid price, and order book depth. Useful for displaying market data or deciding whether conditions are favorable before submitting a trade. |
+| `GET /dex/arbitrage/:assetCode/:assetIssuer` | Uses Horizon's strict-receive path finding to check whether a circular route exists from an asset back to itself. Returns all discovered paths and flags which ones are profitable (source amount less than destination amount). |
+
+**Asset format for DEX endpoints:** `CODE:ISSUER` — for example `USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`. Use `XLM:native` for the native asset.
+
+These endpoints wrap Horizon's order book and path-finding APIs, normalizing the responses into the standard StellarKit envelope so you get consistent `success`, `data`, and `error` fields across all calls.
+
+---
+
 ## 🌐 Stellar Resources
 
 - [Stellar Developers Portal](https://developers.stellar.org)
