@@ -780,4 +780,404 @@ describe("StellarKit API", () => {
       expect(res.body.error.type).toBe("ValidationError");
     });
   });
+
+  // ── DEX Price ──────────────────────────────────────────────────────────────
+  describe("GET /dex/price/:sellAsset/:buyAsset", () => {
+    const USDC_ISSUER = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
+    const validSell = "XLM:native";
+    const validBuy = `USDC:${USDC_ISSUER}`;
+
+    it("returns 400 for invalid sellAsset format", async () => {
+      const res = await request(app).get(`/dex/price/BADFORMAT/${validBuy}`);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 for invalid buyAsset format", async () => {
+      const res = await request(app).get(`/dex/price/${validSell}/BADFORMAT`);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 for invalid amount param", async () => {
+      const res = await request(app).get(`/dex/price/${validSell}/${validBuy}?amount=-5`);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 for non-numeric amount param", async () => {
+      const res = await request(app).get(`/dex/price/${validSell}/${validBuy}?amount=abc`);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 200 with correct shape when a path exists", async () => {
+      jest.spyOn(server, "strictSendPaths").mockReturnValue({
+        call: async () => ({
+          records: [
+            {
+              source_amount: "100.0000000",
+              destination_amount: "12.5000000",
+              path: [],
+            },
+          ],
+        }),
+      });
+
+      const res = await request(app).get(`/dex/price/${validSell}/${validBuy}?amount=100`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toMatchObject({
+        sellAsset: validSell,
+        buyAsset: validBuy,
+        sellAmount: "100.0000000",
+        buyAmount: "12.5000000",
+        effectiveRate: expect.any(String),
+        bestPath: expect.any(Array),
+      });
+
+      server.strictSendPaths.mockRestore();
+    });
+
+    it("returns 404 when no path exists", async () => {
+      jest.spyOn(server, "strictSendPaths").mockReturnValue({
+        call: async () => ({ records: [] }),
+      });
+
+      const res = await request(app).get(`/dex/price/${validSell}/${validBuy}`);
+      expect(res.statusCode).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("NotFound");
+
+      server.strictSendPaths.mockRestore();
+    });
+
+    it("selects the path with the highest destination amount", async () => {
+      jest.spyOn(server, "strictSendPaths").mockReturnValue({
+        call: async () => ({
+          records: [
+            { source_amount: "100.0000000", destination_amount: "10.0000000", path: [] },
+            { source_amount: "100.0000000", destination_amount: "15.0000000", path: [] },
+            { source_amount: "100.0000000", destination_amount: "12.0000000", path: [] },
+          ],
+        }),
+      });
+
+      const res = await request(app).get(`/dex/price/${validSell}/${validBuy}?amount=100`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.buyAmount).toBe("15.0000000");
+
+      server.strictSendPaths.mockRestore();
+    });
+  });
+
+  // ── Account Volume ─────────────────────────────────────────────────────────
+  describe("GET /account/:id/volume", () => {
+    const VALID_ID = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+
+    it("returns 400 for invalid account ID", async () => {
+      const res = await request(app).get("/account/BADKEY/volume");
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 when days exceeds 90", async () => {
+      const res = await request(app).get(`/account/${VALID_ID}/volume?days=91`);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 for non-numeric days param", async () => {
+      const res = await request(app).get(`/account/${VALID_ID}/volume?days=abc`);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 200 with correct shape and defaults to 30 days", async () => {
+      const query = {
+        limit: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        cursor: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue({ records: [] }),
+      };
+      jest.spyOn(server, "payments").mockReturnValue({
+        forAccount: jest.fn().mockReturnValue(query),
+      });
+
+      const res = await request(app).get(`/account/${VALID_ID}/volume`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toMatchObject({
+        period: { days: 30 },
+        totalTransactions: 0,
+        volumeByAsset: [],
+      });
+
+      jest.restoreAllMocks();
+    });
+
+    it("aggregates sent and received volumes by asset", async () => {
+      const recentDate = new Date(Date.now() - 1000).toISOString();
+      const OTHER = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
+      const mockRecords = [
+        {
+          type: "payment",
+          from: VALID_ID,
+          to: OTHER,
+          asset_code: "USDC",
+          asset_issuer: OTHER,
+          amount: "50.0000000",
+          transaction_successful: true,
+          created_at: recentDate,
+          paging_token: "1",
+        },
+        {
+          type: "payment",
+          from: OTHER,
+          to: VALID_ID,
+          asset_code: "USDC",
+          asset_issuer: OTHER,
+          amount: "25.0000000",
+          transaction_successful: true,
+          created_at: recentDate,
+          paging_token: "2",
+        },
+      ];
+
+      const query = {
+        limit: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        cursor: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue({ records: mockRecords }),
+      };
+      jest.spyOn(server, "payments").mockReturnValue({
+        forAccount: jest.fn().mockReturnValue(query),
+      });
+
+      const res = await request(app).get(`/account/${VALID_ID}/volume?days=30`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.totalTransactions).toBe(2);
+
+      const usdcEntry = res.body.data.volumeByAsset.find((v) => v.assetCode === "USDC");
+      expect(usdcEntry).toBeDefined();
+      expect(usdcEntry.totalSent).toBe("50.0000000");
+      expect(usdcEntry.totalReceived).toBe("25.0000000");
+
+      jest.restoreAllMocks();
+    });
+
+    it("excludes operations outside the time window", async () => {
+      const oldDate = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString();
+      const mockRecords = [
+        {
+          type: "payment",
+          from: VALID_ID,
+          to: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+          asset_code: "XLM",
+          asset_issuer: null,
+          amount: "100.0000000",
+          transaction_successful: true,
+          created_at: oldDate,
+          paging_token: "1",
+        },
+      ];
+
+      const query = {
+        limit: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        cursor: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue({ records: mockRecords }),
+      };
+      jest.spyOn(server, "payments").mockReturnValue({
+        forAccount: jest.fn().mockReturnValue(query),
+      });
+
+      const res = await request(app).get(`/account/${VALID_ID}/volume?days=30`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.totalTransactions).toBe(0);
+      expect(res.body.data.volumeByAsset).toHaveLength(0);
+
+      jest.restoreAllMocks();
+    });
+  });
+
+  // ── Asset Verify ───────────────────────────────────────────────────────────
+  describe("GET /asset/:code/:issuer/verify", () => {
+    const ISSUER = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
+    const CODE = "USDC";
+    const BASE = `/asset/${CODE}/${ISSUER}/verify`;
+
+    const TOML_WITH_ASSET = `
+[[CURRENCIES]]
+code = "USDC"
+issuer = "${ISSUER}"
+`;
+    const TOML_WITHOUT_ASSET = `
+[[CURRENCIES]]
+code = "OTHER"
+issuer = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+`;
+
+    it("returns 400 for invalid asset code", async () => {
+      const res = await request(app).get(`/asset/!!!/${ISSUER}/verify`);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 for invalid issuer", async () => {
+      const res = await request(app).get(`/asset/${CODE}/BADKEY/verify`);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns verified:false when account does not exist", async () => {
+      jest.spyOn(server, "loadAccount").mockRejectedValue({ response: { status: 404 } });
+
+      const res = await request(app).get(BASE);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.verified).toBe(false);
+      expect(res.body.data.checks.accountExists.passed).toBe(false);
+
+      jest.restoreAllMocks();
+    });
+
+    it("returns verified:false when account has no home_domain", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({ home_domain: null });
+
+      const res = await request(app).get(BASE);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.verified).toBe(false);
+      expect(res.body.data.checks.accountExists.passed).toBe(true);
+      expect(res.body.data.checks.hasHomeDomain.passed).toBe(false);
+
+      jest.restoreAllMocks();
+    });
+
+    it("returns verified:false when stellar.toml is unreachable", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({ home_domain: "example.com" });
+      const axios = require("axios");
+      jest.spyOn(axios, "get").mockRejectedValue(new Error("Network error"));
+
+      const res = await request(app).get(BASE);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.verified).toBe(false);
+      expect(res.body.data.checks.tomlReachable.passed).toBe(false);
+
+      jest.restoreAllMocks();
+    });
+
+    it("returns verified:false when asset not listed in CURRENCIES", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({ home_domain: "example.com" });
+      const axios = require("axios");
+      jest.spyOn(axios, "get").mockResolvedValue({ data: TOML_WITHOUT_ASSET });
+
+      const res = await request(app).get(BASE);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.verified).toBe(false);
+      expect(res.body.data.checks.tomlReachable.passed).toBe(true);
+      expect(res.body.data.checks.listedInToml.passed).toBe(false);
+
+      jest.restoreAllMocks();
+    });
+
+    it("returns verified:true when all checks pass", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({ home_domain: "example.com" });
+      const axios = require("axios");
+      jest.spyOn(axios, "get").mockResolvedValue({ data: TOML_WITH_ASSET });
+
+      const res = await request(app).get(BASE);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.verified).toBe(true);
+      expect(res.body.data.checks.accountExists.passed).toBe(true);
+      expect(res.body.data.checks.hasHomeDomain.passed).toBe(true);
+      expect(res.body.data.checks.tomlReachable.passed).toBe(true);
+      expect(res.body.data.checks.listedInToml.passed).toBe(true);
+
+      jest.restoreAllMocks();
+    });
+  });
+
+  // ── Fee Trends ─────────────────────────────────────────────────────────────
+  describe("GET /fee-estimate/trends", () => {
+    function makeLedger(baseFee, txCount = 0) {
+      return { base_fee_in_stroops: baseFee, successful_transaction_count: txCount };
+    }
+
+    function mockLedgers(records) {
+      const query = {
+        order: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue({ records }),
+      };
+      jest.spyOn(server, "ledgers").mockReturnValue(query);
+    }
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it("returns 200 with required fields", async () => {
+      const records = Array.from({ length: 50 }, () => makeLedger(100));
+      mockLedgers(records);
+
+      const res = await request(app).get("/fee-estimate/trends");
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toMatchObject({
+        ledgersAnalyzed: 50,
+        avgBaseFee: expect.any(Number),
+        minBaseFee: expect.any(Number),
+        maxBaseFee: expect.any(Number),
+        avgCapacityUsage: expect.any(Number),
+        trend: expect.stringMatching(/^(rising|falling|stable)$/),
+        recommendation: expect.any(String),
+      });
+    });
+
+    it("returns trend:stable when fees are constant", async () => {
+      const records = Array.from({ length: 50 }, () => makeLedger(100));
+      mockLedgers(records);
+
+      const res = await request(app).get("/fee-estimate/trends");
+      expect(res.body.data.trend).toBe("stable");
+    });
+
+    it("returns trend:rising when recent fees are higher than older fees", async () => {
+      // records are desc (newest first): first 25 = recent (high), last 25 = older (low)
+      const recent = Array.from({ length: 25 }, () => makeLedger(200));
+      const older  = Array.from({ length: 25 }, () => makeLedger(100));
+      mockLedgers([...recent, ...older]);
+
+      const res = await request(app).get("/fee-estimate/trends");
+      expect(res.body.data.trend).toBe("rising");
+    });
+
+    it("returns trend:falling when recent fees are lower than older fees", async () => {
+      const recent = Array.from({ length: 25 }, () => makeLedger(100));
+      const older  = Array.from({ length: 25 }, () => makeLedger(200));
+      mockLedgers([...recent, ...older]);
+
+      const res = await request(app).get("/fee-estimate/trends");
+      expect(res.body.data.trend).toBe("falling");
+    });
+
+    it("computes correct min, max, and avg", async () => {
+      const records = [
+        makeLedger(50), makeLedger(100), makeLedger(150),
+        ...Array.from({ length: 47 }, () => makeLedger(100)),
+      ];
+      mockLedgers(records);
+
+      const res = await request(app).get("/fee-estimate/trends");
+      expect(res.body.data.minBaseFee).toBe(50);
+      expect(res.body.data.maxBaseFee).toBe(150);
+    });
+  });
 });

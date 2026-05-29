@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { server } = require("../config/stellar");
+const { server, fetchAccountCreation } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { Asset } = require("@stellar/stellar-sdk");
 const {
@@ -9,6 +9,7 @@ const {
   validateLimit,
 } = require("../utils/validators");
 const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
+const { buildAccountAgeResponse } = require("../utils/accountAge");
 
 const handleAccountNotFound = (err, next) => {
   if (err.response && err.response.status === 404) {
@@ -402,6 +403,7 @@ router.get("/:id/sequence", async (req, res, next) => {
   }
 });
 
+ AccountTrustlineHealthDasboardEndpoint
 router.get(
   "/:id/summary",
   accountSummaryRateLimiter,
@@ -409,6 +411,221 @@ router.get(
     try {
       const { id } = req.params;
       validateAccountId(id);
+
+/**
+ * GET /account/:id/inactivity
+ * Detects how long a Stellar account has been inactive by analyzing its most recent transaction.
+ *
+ * Returns inactivity details including the timestamp of the last transaction,
+ * its hash, the number of days since it occurred, and a status:
+ * - "active" (< 30 days)
+ * - "idle" (30–180 days)
+ * - "dormant" (> 180 days)
+ *
+ * If no transactions are found, returns { status: "no_transactions" }.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/inactivity
+ */
+router.get("/:id/inactivity", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Fetch the most recent transaction for the account
+    const txResponse = await server
+      .transactions()
+      .forAccount(id)
+      .order("desc")
+      .limit(1)
+      .call();
+
+    if (txResponse.records.length === 0) {
+      return success(res, { status: "no_transactions" });
+    }
+
+    const lastTx = txResponse.records[0];
+    const lastTransactionAt = lastTx.created_at;
+    const lastTransactionHash = lastTx.hash;
+
+    const lastTxDate = new Date(lastTransactionAt);
+    const now = new Date();
+    const diffInMs = now - lastTxDate;
+    const daysSinceLastTransaction = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    let status;
+    if (daysSinceLastTransaction < 30) {
+      status = "active";
+    } else if (daysSinceLastTransaction <= 180) {
+      status = "idle";
+    } else {
+      status = "dormant";
+    }
+
+    return success(res, {
+      lastTransactionAt,
+      lastTransactionHash,
+      daysSinceLastTransaction,
+      status,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/sponsorship
+ * Resolves the full sponsorship structure of a Stellar account.
+ *
+ * Returns:
+ * - accountSponsor: The account sponsoring the queried account's existence.
+ * - sponsoredEntries: List of subentries (trustlines, offers, data, etc.) sponsored by others.
+ * - accountsSponsoring: List of other accounts that the queried account is currently sponsoring.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sponsorship
+ */
+router.get("/:id/sponsorship", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    const sponsoredEntries = [];
+
+    // Check balances (trustlines)
+    account.balances.forEach((b) => {
+      if (b.sponsor) {
+        sponsoredEntries.push({
+          type: "trustline",
+          asset: b.asset_type === "native" ? "XLM" : `${b.asset_code}:${b.asset_issuer}`,
+          sponsor: b.sponsor,
+        });
+      }
+    });
+
+    // Check signers
+    account.signers.forEach((s) => {
+      if (s.sponsor) {
+        sponsoredEntries.push({
+          type: "signer",
+          key: s.key,
+          sponsor: s.sponsor,
+        });
+      }
+    });
+
+    // Check data entries
+    if (account.data_attr) {
+      // In Horizon response, data sponsors are in 'data_sponsors' object
+      const dataSponsors = account.data_sponsors || {};
+      Object.keys(account.data_attr).forEach((key) => {
+        if (dataSponsors[key]) {
+          sponsoredEntries.push({
+            type: "data_entry",
+            key: key,
+            sponsor: dataSponsors[key],
+          });
+        }
+      });
+    }
+
+    // Check for sponsored accounts (accounts where this account is the sponsor)
+    // We can find this by querying accounts where 'sponsor' is this account ID
+    const sponsoringResponse = await server.accounts().sponsor(id).call();
+    const accountsSponsoring = sponsoringResponse.records.map((acc) => acc.id);
+
+    return success(res, {
+      accountId: account.id,
+      accountSponsor: account.sponsor || null,
+      numSponsored: account.num_sponsored || 0,
+      numSponsoring: account.num_sponsoring || 0,
+      sponsoredEntries,
+      accountsSponsoring,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/subentry-health
+ * Analyzes an account's subentry usage and warns when approaching the protocol limit.
+ *
+ * Subentries include trustlines, offers, data entries, and additional signers.
+ * The standard protocol limit is 1000 subentries per account.
+ *
+ * Returns:
+ * - totalSubentries: Current number of subentries.
+ * - maxSubentries: The protocol limit (1000).
+ * - remainingSlots: Number of subentries that can still be added.
+ * - usagePercent: Percentage of limit used.
+ * - warning: "critical" (>95%), "approaching_limit" (>80%), or null.
+ * - breakdown: Count of each subentry type.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/subentry-health
+ */
+router.get("/:id/subentry-health", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    const MAX_SUBENTRIES = 1000;
+    const totalSubentries = account.subentry_count;
+    const remainingSlots = Math.max(0, MAX_SUBENTRIES - totalSubentries);
+    const usagePercent = (totalSubentries / MAX_SUBENTRIES) * 100;
+
+    let warning = null;
+    if (usagePercent > 95) {
+      warning = "critical";
+    } else if (usagePercent > 80) {
+      warning = "approaching_limit";
+    }
+
+    // Breakdown calculation
+    const trustlines = account.balances.filter((b) => b.asset_type !== "native").length;
+    const dataEntries = Object.keys(account.data_attr || {}).length;
+    const additionalSigners = Math.max(0, account.signers.length - 1);
+
+    // Offers are not directly listed in the account object, but they contribute to subentry_count
+    // We can infer them or fetch them. Since we need an accurate breakdown, let's fetch the count.
+    // However, fetching all offers might be expensive. We can estimate:
+    // offers = subentry_count - trustlines - data_entries - signers
+    // Note: Protocol 14+ claimable balances also count if sponsored, but let's stick to the basics first.
+    const inferredOffers = Math.max(0, totalSubentries - trustlines - dataEntries - additionalSigners);
+
+    return success(res, {
+      totalSubentries,
+      maxSubentries: MAX_SUBENTRIES,
+      remainingSlots,
+      usagePercent: parseFloat(usagePercent.toFixed(2)),
+      warning,
+      breakdown: {
+        trustlines,
+        offers: inferredOffers,
+        dataEntries,
+        additionalSigners,
+      },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+router.get("/:id/summary", accountSummaryRateLimiter, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
 
       const [accountResult, txResult, offersResult, claimableResult] =
         await Promise.allSettled([
@@ -1720,14 +1937,28 @@ router.get("/:id/risk-score", async (req, res, next) => {
 });
 
 /**
+ AccountTrustlineHealthDasboardEndpoint
  * GET /account/:id/trustline-health
  * Returns a complete health overview of all trustlines on an account,
  * including authorization status, liability usage, available capacity,
  * and warnings for trustlines near their limits.
+
+ * GET /account/:id/age
+ * Returns account age and longevity metrics for trust and reputation systems.
+ *
+ * Fetches the account's first funding transaction from Horizon and calculates:
+ * - ageInDays: Complete days since account creation
+ * - ageInMonths: Floored months (ageInDays / 30.4375)
+ * - ageInYears: Floored years (ageInDays / 365.25)
+ * - maturity: 'new' (<30 days), 'established' (30–364 days), or 'veteran' (≥365 days)
+ * - createdAt: ISO 8601 timestamp of account creation
+ * - createdAtLedger: Ledger sequence number of first funding transaction
+ main
  *
  * @param {string} id - Stellar account public key (G...)
  *
  * @example
+ AccountTrustlineHealthDasboardEndpoint
  * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trustline-health
  */
 router.get("/:id/trustline-health", async (req, res, next) => {
@@ -1785,6 +2016,148 @@ router.get("/:id/trustline-health", async (req, res, next) => {
       trustlineCount: trustlines.length,
       warningCount: warningCount,
       trustlines: trustlines,
+
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/age
+ *
+ * Response (200):
+ * {
+ *   "success": true,
+ *   "data": {
+ *     "publicKey": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+ *     "createdAtLedger": 12345678,
+ *     "createdAt": "2020-06-15T10:30:45Z",
+ *     "ageInDays": 1234,
+ *     "ageInMonths": 40,
+ *     "ageInYears": 3,
+ *     "maturity": "veteran"
+ *   }
+ * }
+ */
+router.get("/:id/age", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Validate the public key
+    validateAccountId(id);
+
+    // 2. Fetch creation data from Horizon
+    const creation = await fetchAccountCreation(id);
+
+    // 3. Build the response
+    const response = buildAccountAgeResponse({
+      publicKey: id,
+      createdAtLedger: creation.ledger,
+      createdAt: creation.timestamp,
+    });
+
+    // 4. Return with success wrapper
+    return success(res, response);
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/volume?days=30
+ * Computes total transaction volume for a Stellar account over the last N days,
+ * broken down by asset.
+ *
+ * Query params:
+ *   - days  (number, default: 30, max: 90)
+ *
+ * @example
+ * GET /account/GAAZI4.../volume?days=7
+ */
+router.get("/:id/volume", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const days = parseInt(req.query.days || "30", 10);
+    if (isNaN(days) || days < 1 || days > 90) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: "days must be a number between 1 and 90.",
+        },
+      });
+    }
+
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Paginate through all payment operations in the window (asc so we can stop early)
+    const volumeMap = {}; // assetKey -> { assetCode, assetIssuer, totalSent, totalReceived }
+    let totalTransactions = 0;
+    let cursor;
+    let done = false;
+
+    while (!done) {
+      let query = server.payments().forAccount(id).limit(200).order("asc");
+      if (cursor) query = query.cursor(cursor);
+
+      const page = await query.call();
+      const records = page.records || [];
+
+      if (records.length === 0) break;
+
+      for (const op of records) {
+        const createdAt = new Date(op.created_at);
+        if (createdAt < since) {
+          cursor = op.paging_token;
+          continue;
+        }
+        // Records are ascending; once we pass 90 days window we're done
+        // (no upper bound needed — we want up to now)
+
+        if (!op.transaction_successful) {
+          cursor = op.paging_token;
+          continue;
+        }
+
+        const assetCode = op.asset_code || "XLM";
+        const assetIssuer = op.asset_issuer || null;
+        const assetKey = assetIssuer ? `${assetCode}:${assetIssuer}` : assetCode;
+        const amount = parseFloat(op.amount || op.starting_balance || "0");
+
+        if (!volumeMap[assetKey]) {
+          volumeMap[assetKey] = { assetCode, assetIssuer, totalSent: 0, totalReceived: 0 };
+        }
+
+        // Determine direction relative to the queried account
+        const isSent =
+          (op.type === "payment" && op.from === id) ||
+          (op.type === "create_account" && op.funder === id);
+
+        if (isSent) {
+          volumeMap[assetKey].totalSent += amount;
+        } else {
+          volumeMap[assetKey].totalReceived += amount;
+        }
+
+        totalTransactions++;
+        cursor = op.paging_token;
+      }
+
+      // If we got fewer than the page size, we've exhausted history
+      if (records.length < 200) done = true;
+    }
+
+    const volumeByAsset = Object.values(volumeMap).map((v) => ({
+      assetCode: v.assetCode,
+      assetIssuer: v.assetIssuer,
+      totalSent: v.totalSent.toFixed(7),
+      totalReceived: v.totalReceived.toFixed(7),
+    }));
+
+    return success(res, {
+      period: {
+        days,
+        from: since.toISOString(),
+        to: new Date().toISOString(),
+      },
+      totalTransactions,
+      volumeByAsset,
     });
   } catch (err) {
     handleAccountNotFound(err, next);

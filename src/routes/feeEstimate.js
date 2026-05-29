@@ -210,4 +210,73 @@ router.get("/surge-status", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /fee-estimate/trends
+ * Analyzes fee trends across the last 50 ledgers and returns a statistical
+ * summary to help developers make smarter fee decisions.
+ *
+ * Returns { avgBaseFee, minBaseFee, maxBaseFee, avgCapacityUsage, trend, recommendation }
+ * trend is "rising", "falling", or "stable" based on first 25 vs last 25 ledger base fees.
+ *
+ * @example
+ * GET /fee-estimate/trends
+ */
+router.get("/trends", async (req, res, next) => {
+  try {
+    const ledgersResponse = await server.ledgers().order("desc").limit(50).call();
+    const records = ledgersResponse.records || [];
+
+    if (records.length === 0) {
+      const err = new Error("Unable to fetch recent ledger data.");
+      err.status = 503;
+      throw err;
+    }
+
+    const fees = records.map((l) => parseInt(l.base_fee_in_stroops || l.base_fee, 10) || 100);
+    const capacities = records.map((l) => {
+      const maxTxSetSize = 1000;
+      return Math.min((l.successful_transaction_count || 0) / maxTxSetSize, 1.0);
+    });
+
+    const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+
+    const avgBaseFee = avg(fees);
+    const minBaseFee = Math.min(...fees);
+    const maxBaseFee = Math.max(...fees);
+    const avgCapacityUsage = avg(capacities);
+
+    // records are desc (newest first); split into first-half (newest) and second-half (oldest)
+    const half = Math.floor(records.length / 2);
+    const recentAvg = avg(fees.slice(0, half));
+    const olderAvg  = avg(fees.slice(half));
+
+    let trend;
+    const delta = recentAvg - olderAvg;
+    if (delta > 5)       trend = "rising";
+    else if (delta < -5) trend = "falling";
+    else                 trend = "stable";
+
+    let recommendation;
+    if (trend === "rising") {
+      recommendation = "Fees are rising. Use the standard or priority tier to ensure timely inclusion.";
+    } else if (trend === "falling") {
+      recommendation = "Fees are falling. Economy tier may be sufficient for non-urgent transactions.";
+    } else {
+      recommendation = "Fees are stable. Standard tier is a safe choice for most transactions.";
+    }
+
+    return success(res, {
+      ledgersAnalyzed: records.length,
+      avgBaseFee: Math.round(avgBaseFee),
+      minBaseFee,
+      maxBaseFee,
+      avgCapacityUsage: parseFloat(avgCapacityUsage.toFixed(4)),
+      trend,
+      recommendation,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

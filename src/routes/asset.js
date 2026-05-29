@@ -277,4 +277,91 @@ router.get("/search", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /asset/:code/:issuer/verify
+ * Fully verifies a Stellar asset issuer by checking account existence,
+ * home_domain, stellar.toml reachability, and asset listing in CURRENCIES.
+ *
+ * Returns { verified, checks: { accountExists, hasHomeDomain, tomlReachable, listedInToml } }
+ * Each check has { passed: boolean, detail: string }
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/verify
+ */
+router.get("/:code/:issuer/verify", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+
+    try {
+      validateAssetCode(code);
+      validateAccountId(issuer);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: err.message },
+      });
+    }
+
+    const assetCode = code.toUpperCase();
+    const axios = require("axios");
+
+    const checks = {
+      accountExists: { passed: false, detail: "Account not found on Stellar network." },
+      hasHomeDomain: { passed: false, detail: "No home_domain set on issuer account." },
+      tomlReachable: { passed: false, detail: "stellar.toml not fetched (home_domain required)." },
+      listedInToml:  { passed: false, detail: "Asset not listed in CURRENCIES (toml required)." },
+    };
+
+    // 1. Account exists
+    let issuerAccount;
+    try {
+      issuerAccount = await server.loadAccount(issuer);
+      checks.accountExists = { passed: true, detail: "Issuer account exists on the Stellar network." };
+    } catch (err) {
+      // All subsequent checks depend on account existing
+      return success(res, { verified: false, checks });
+    }
+
+    // 2. Has home_domain
+    const homeDomain = issuerAccount.home_domain;
+    if (!homeDomain) {
+      return success(res, { verified: false, checks });
+    }
+    checks.hasHomeDomain = { passed: true, detail: `home_domain is "${homeDomain}".` };
+
+    // 3. stellar.toml reachable
+    const tomlUrl = `https://${homeDomain}/.well-known/stellar.toml`;
+    let tomlText;
+    try {
+      const response = await axios.get(tomlUrl, { timeout: 5000 });
+      tomlText = response.data;
+      checks.tomlReachable = { passed: true, detail: `stellar.toml fetched from ${tomlUrl}.` };
+    } catch (err) {
+      return success(res, { verified: false, checks });
+    }
+
+    // 4. Asset listed in CURRENCIES section
+    // Parse CURRENCIES entries: look for lines with code and issuer
+    const codePattern = new RegExp(`code\\s*=\\s*["']?${assetCode}["']?`, "i");
+    const issuerPattern = new RegExp(`issuer\\s*=\\s*["']?${issuer}["']?`, "i");
+
+    // Split into [[CURRENCIES]] blocks and check each
+    const blocks = tomlText.split(/\[\[CURRENCIES\]\]/i).slice(1);
+    const listed = blocks.some(
+      (block) => codePattern.test(block) && issuerPattern.test(block)
+    );
+
+    if (listed) {
+      checks.listedInToml = { passed: true, detail: `${assetCode} is listed in the CURRENCIES section of stellar.toml.` };
+    } else {
+      checks.listedInToml = { passed: false, detail: `${assetCode} was not found in the CURRENCIES section of stellar.toml.` };
+    }
+
+    const verified = Object.values(checks).every((c) => c.passed);
+    return success(res, { verified, checks });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

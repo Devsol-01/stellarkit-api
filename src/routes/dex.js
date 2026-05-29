@@ -222,4 +222,212 @@ router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /dex/depth/:sellAsset/:buyAsset
+ * Analyzes the full depth of a Stellar DEX order book for a trading pair.
+ *
+ * Returns a summary of bids and asks, total volumes, top 5 of each,
+ * and a depth rating:
+ * - "deep": total volume >= 50,000
+ * - "moderate": total volume >= 5,000
+ * - "shallow": total volume < 5,000
+ *
+ * Asset format: CODE:ISSUER or XLM:native
+ *
+ * @example
+ * GET /dex/depth/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+ */
+router.get("/depth/:sellAsset/:buyAsset", async (req, res, next) => {
+  try {
+    const { sellAsset, buyAsset } = req.params;
+
+    const parseStellarAsset = (assetString) => {
+      const parts = assetString.split(":");
+      if (parts.length !== 2) {
+        throw new Error(`Invalid asset format: "${assetString}". Expected format: CODE:ISSUER`);
+      }
+
+      const [code, issuer] = parts;
+
+      if (code.toUpperCase() === "XLM" && issuer.toLowerCase() === "native") {
+        return Asset.native();
+      }
+
+      validateAssetCode(code);
+      validateAccountId(issuer);
+
+      return new Asset(code.toUpperCase(), issuer);
+    };
+
+    let selling, buying;
+    try {
+      selling = parseStellarAsset(sellAsset);
+      buying = parseStellarAsset(buyAsset);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: err.message,
+        },
+      });
+    }
+
+    const orderBookResponse = await server
+      .orderbook(selling, buying)
+      .limit(200)
+      .call();
+
+    const bids = orderBookResponse.bids || [];
+    const asks = orderBookResponse.asks || [];
+
+    if (bids.length === 0 && asks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "No order book exists for this trading pair.",
+        },
+      });
+    }
+
+    const totalBidVolume = bids.reduce((sum, bid) => sum + parseFloat(bid.amount), 0);
+    const totalAskVolume = asks.reduce((sum, ask) => sum + parseFloat(ask.amount), 0);
+    const totalVolume = totalBidVolume + totalAskVolume;
+
+    let depthRating;
+    if (totalVolume >= 50000) {
+      depthRating = "deep";
+    } else if (totalVolume >= 5000) {
+      depthRating = "moderate";
+    } else {
+      depthRating = "shallow";
+    }
+
+    const formatOrder = (order) => ({
+      price: order.price,
+      amount: order.amount,
+    });
+
+    return success(res, {
+      bidsCount: bids.length,
+      asksCount: asks.length,
+      totalBidVolume: totalBidVolume.toFixed(7),
+      totalAskVolume: totalAskVolume.toFixed(7),
+      top5Bids: bids.slice(0, 5).map(formatOrder),
+      top5Asks: asks.slice(0, 5).map(formatOrder),
+      depthRating,
+    });
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "No order book exists for this trading pair.",
+        },
+      });
+    }
+    next(err);
+  }
+});
+
+/**
+ * GET /dex/price/:sellAsset/:buyAsset?amount=:amount
+ * Calculates the effective exchange rate between two assets using the best
+ * available payment path on the Stellar DEX.
+ *
+ * Asset format: CODE:ISSUER or XLM:native
+ * amount query param: amount of sellAsset to convert (default: 1)
+ *
+ * @example
+ * GET /dex/price/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN?amount=100
+ */
+router.get("/price/:sellAsset/:buyAsset", async (req, res, next) => {
+  try {
+    const { sellAsset, buyAsset } = req.params;
+    const amount = req.query.amount || "1";
+
+    const parseStellarAsset = (assetString) => {
+      const parts = assetString.split(":");
+      if (parts.length !== 2) {
+        throw new Error(`Invalid asset format: "${assetString}". Expected format: CODE:ISSUER`);
+      }
+      const [code, issuer] = parts;
+      if (code.toUpperCase() === "XLM" && issuer.toLowerCase() === "native") {
+        return Asset.native();
+      }
+      validateAssetCode(code);
+      validateAccountId(issuer);
+      return new Asset(code.toUpperCase(), issuer);
+    };
+
+    // Validate amount
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: "amount must be a positive number." },
+      });
+    }
+
+    let selling, buying;
+    try {
+      selling = parseStellarAsset(sellAsset);
+      buying = parseStellarAsset(buyAsset);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: err.message },
+      });
+    }
+
+    // Use strictSendPaths: given a fixed source amount, find the best destination amount
+    const formattedAmount = parsedAmount.toFixed(7);
+    const pathsResponse = await server
+      .strictSendPaths(selling, formattedAmount, [buying])
+      .call();
+
+    const records = pathsResponse.records || [];
+
+    if (records.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: { type: "NotFound", message: "No payment path exists between these two assets." },
+      });
+    }
+
+    // Best path = highest destination amount
+    const best = records.reduce((a, b) =>
+      parseFloat(a.destination_amount) >= parseFloat(b.destination_amount) ? a : b
+    );
+
+    const sellAmount = parseFloat(best.source_amount);
+    const buyAmount = parseFloat(best.destination_amount);
+    const effectiveRate = buyAmount / sellAmount;
+
+    const bestPath = best.path.map((hop) => ({
+      assetCode: hop.asset_code || "XLM",
+      assetIssuer: hop.asset_issuer || "native",
+    }));
+
+    return success(res, {
+      sellAsset,
+      buyAsset,
+      sellAmount: sellAmount.toFixed(7),
+      buyAmount: buyAmount.toFixed(7),
+      effectiveRate: effectiveRate.toFixed(7),
+      bestPath,
+    });
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: { type: "NotFound", message: "No payment path exists between these two assets." },
+      });
+    }
+    next(err);
+  }
+});
+
 module.exports = router;
