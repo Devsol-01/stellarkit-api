@@ -61,4 +61,59 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /network/ledger-timing
+ * Analyzes the last 50 ledger close times and returns statistics about network block time consistency.
+ */
+router.get("/ledger-timing", async (req, res, next) => {
+  try {
+    const ledgers = await server.ledgers().limit(50).order("desc").call();
+    const records = ledgers.records;
+
+    if (records.length < 2) {
+      return success(res, {
+        avgCloseTimeSeconds: 0,
+        minCloseTime: 0,
+        maxCloseTime: 0,
+        stdDeviation: 0,
+        consistency: "stable",
+      });
+    }
+
+    const intervals = [];
+    for (let i = 0; i < records.length - 1; i++) {
+      const current = new Date(records[i].closed_at).getTime();
+      const nextL = new Date(records[i + 1].closed_at).getTime();
+      intervals.push(Math.abs(current - nextL) / 1000);
+    }
+
+    const sum = intervals.reduce((a, b) => a + b, 0);
+    const avg = sum / intervals.length;
+    const min = Math.min(...intervals);
+    const max = Math.max(...intervals);
+
+    const squareDiffs = intervals.map((v) => Math.pow(v - avg, 2));
+    const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / squareDiffs.length;
+    const stdDev = Math.sqrt(avgSquareDiff);
+
+    let consistency = "stable";
+    if (stdDev > 1.5) {
+      consistency = "unstable";
+    } else if (stdDev > 0.5) {
+      consistency = "variable";
+    }
+
+    return success(res, {
+      avgCloseTimeSeconds: parseFloat(avg.toFixed(2)),
+      minCloseTime: parseFloat(min.toFixed(2)),
+      maxCloseTime: parseFloat(max.toFixed(2)),
+      stdDeviation: parseFloat(stdDev.toFixed(2)),
+      consistency,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
+

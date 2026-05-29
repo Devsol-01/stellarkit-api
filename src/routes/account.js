@@ -1644,4 +1644,70 @@ router.get("/:id/risk-score", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /account/:id/counterparties
+ * Analyzes the frequency of senders and receivers for the last 100 payment operations.
+ *
+ * @param {string} id - Stellar account public key
+ */
+router.get("/:id/counterparties", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const LIMIT = 100;
+    const opResponse = await server
+      .operations()
+      .forAccount(id)
+      .limit(LIMIT)
+      .order("desc")
+      .call();
+
+    const senders = {};
+    const receivers = {};
+
+    opResponse.records.forEach((op) => {
+      let counterparty = null;
+      let isSend = false;
+
+      if (op.type === "payment" || op.type === "path_payment_strict_receive" || op.type === "path_payment_strict_send") {
+        if (op.from === id) {
+          counterparty = op.to;
+          isSend = true;
+        } else if (op.to === id) {
+          counterparty = op.from;
+          isSend = false;
+        }
+      } else if (op.type === "create_account") {
+        if (op.funder === id) {
+          counterparty = op.account;
+          isSend = true;
+        } else if (op.account === id) {
+          counterparty = op.funder;
+          isSend = false;
+        }
+      }
+
+      if (counterparty) {
+        const target = isSend ? receivers : senders;
+        target[counterparty] = (target[counterparty] || 0) + 1;
+      }
+    });
+
+    const formatTop = (counts) =>
+      Object.entries(counts)
+        .map(([accountId, transactionCount]) => ({ accountId, transactionCount }))
+        .sort((a, b) => b.transactionCount - a.transactionCount)
+        .slice(0, 10);
+
+    return success(res, {
+      topSenders: formatTop(senders),
+      topReceivers: formatTop(receivers),
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
 module.exports = router;
+

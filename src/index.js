@@ -93,7 +93,11 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/asset/search?code=:code", description: "Search assets by code across all issuers" },
         { method: "GET", path: "/dex/arbitrage/:code/:issuer", description: "Find profitable circular arbitrage paths for an asset" },
         { method: "GET", path: "/dex/spread/:sellAsset/:buyAsset", description: "Calculate bid-ask spread for a DEX trading pair" },
+        { method: "GET", path: "/dex/imbalance/:sellAsset/:buyAsset", description: "Detect buy/sell pressure imbalance on a trading pair" },
+        { method: "GET", path: "/account/:id/counterparties", description: "Analyze frequent payment counterparties for an account" },
+        { method: "GET", path: "/network/ledger-timing", description: "Analyze network ledger close time consistency" },
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
+
         { method: "GET", path: "/utils/friendbot/:accountId",       description: "Fund a testnet account via Friendbot (testnet only)" },
         { method: "GET", path: "/utils/validate-account?id=:id",   description: "Validate a Stellar public key format (no Horizon call)" },
         { method: "WS",  path: "/stream/ledgers",                  description: "Real-time stream of live Stellar ledger updates" },
