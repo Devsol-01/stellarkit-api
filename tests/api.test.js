@@ -43,30 +43,37 @@ describe("StellarKit API", () => {
 
   // ── Validation ─────────────────────────────────────────────────────────────
   describe("GET /account/:id — validation", () => {
-    it("returns 400 for an invalid account ID", async () => {
+    it("returns 400 for an invalid account ID with field-level details", async () => {
       const res = await request(app).get("/account/NOT_A_VALID_KEY");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
       expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.field).toBe("accountId");
+      expect(res.body.error.receivedValue).toBe("NOT_A_VALID_KEY");
+      expect(res.body.error.expectedFormat).toBeDefined();
     });
   });
 
   describe("GET /transactions/:id — validation", () => {
-    it("returns 400 for an invalid account ID", async () => {
+    it("returns 400 for an invalid account ID with field-level details", async () => {
       const res = await request(app).get("/transactions/BADKEY123");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
+      expect(res.body.error.field).toBe("accountId");
+      expect(res.body.error.receivedValue).toBe("BADKEY123");
     });
 
-    it("returns 400 for an invalid limit param", async () => {
+    it("returns 400 for an invalid limit param with field-level details", async () => {
       const res = await request(app).get(
-        "/transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN?limit=999999",
+        "/transactions/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN?limit=999999",
       );
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
+      expect(res.body.error.field).toBe("limit");
+      expect(res.body.error.receivedValue).toBe("999999");
     });
 
-    it("returns 400 for an invalid order param", async () => {
+    it("returns 400 for an invalid order param with field-level details", async () => {
       const res = await request(app).get(
         "/transactions/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN?order=invalid",
       );
@@ -74,11 +81,13 @@ describe("StellarKit API", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error.message).toContain("asc");
       expect(res.body.error.message).toContain("desc");
+      expect(res.body.error.field).toBe("order");
+      expect(res.body.error.receivedValue).toBe("invalid");
     });
   });
 
   describe("GET /transactions/:id/operations — validation", () => {
-    it("returns 400 for an invalid order param", async () => {
+    it("returns 400 for an invalid order param with field-level details", async () => {
       const res = await request(app).get(
         "/transactions/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/operations?order=invalid",
       );
@@ -86,6 +95,8 @@ describe("StellarKit API", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error.message).toContain("asc");
       expect(res.body.error.message).toContain("desc");
+      expect(res.body.error.field).toBe("order");
+      expect(res.body.error.receivedValue).toBe("invalid");
     });
   });
 
