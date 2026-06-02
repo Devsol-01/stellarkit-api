@@ -3,6 +3,7 @@ const router = express.Router();
 const { server, fetchAccountCreation } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
+const { formatBalance } = require("../utils/formatBalance");
 const { Asset } = require("@stellar/stellar-sdk");
 const {
   validateAccountId,
@@ -29,19 +30,19 @@ function formatAccountBalances(account) {
       assetCode: b.asset_code,
       assetIssuer: b.asset_issuer,
       assetType: b.asset_type,
-      balance: b.balance,
+      balance: formatBalance(b.balance),
       limit: b.limit,
-      buyingLiabilities: b.buying_liabilities,
-      sellingLiabilities: b.selling_liabilities,
+      buyingLiabilities: formatBalance(b.buying_liabilities),
+      sellingLiabilities: formatBalance(b.selling_liabilities),
       isAuthorized: b.is_authorized,
       isClawbackEnabled: b.is_clawback_enabled,
     }));
 
   return {
     xlm: {
-      balance: xlmBalance ? xlmBalance.balance : "0.0000000",
-      buyingLiabilities: xlmBalance ? xlmBalance.buying_liabilities : "0",
-      sellingLiabilities: xlmBalance ? xlmBalance.selling_liabilities : "0",
+      balance: formatBalance(xlmBalance ? xlmBalance.balance : "0.0000000"),
+      buyingLiabilities: formatBalance(xlmBalance ? xlmBalance.buying_liabilities : "0"),
+      sellingLiabilities: formatBalance(xlmBalance ? xlmBalance.selling_liabilities : "0"),
     },
     assets,
   };
