@@ -62,6 +62,9 @@ function errorHandler(err, req, res, next) {
       error: {
         type: "ValidationError",
         message: err.message,
+        field: err.field,
+        receivedValue: err.receivedValue,
+        expectedFormat: err.expectedFormat,
       },
     });
   }
