@@ -13,6 +13,7 @@ const contentTypeValidator = require("./middleware/contentTypeValidator");
 const bodySizeLimit = require("./middleware/bodySizeLimit");
 const errorHandler = require("./middleware/errorHandler");
 const apiKeyMiddleware = require("./middleware/apiKey");
+const sanitize = require("./middleware/sanitize");
 
 const networkStatusRouter = require("./routes/networkStatus");
 const feeEstimateRouter = require("./routes/feeEstimate");
@@ -41,6 +42,9 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 // ── Rate Limiting ───────────────────────────────────────────────────────────
 app.use(rateLimiter);
 
+// ── Input Sanitization ──────────────────────────────────────────────────────
+app.use(sanitize);
+
 // ── Health Check ────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
   res.json({
@@ -61,7 +65,9 @@ app.use(apiKeyMiddleware);
 // ── API Routes ───────────────────────────────────────────────────────────────
 app.use("/network-status", networkStatusRouter);
 app.use("/fee-estimate", feeEstimateRouter);
+const accountCounterpartiesRouter = require("./routes/account.counterparties");
 app.use("/account", accountRouter);
+app.use("/account", accountCounterpartiesRouter);
 app.use("/transactions", transactionsRouter);
 app.use("/asset", assetRouter);
 app.use("/dex", dexRouter);
@@ -127,6 +133,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
         { method: "GET", path: "/liquidity-pools/:id/reserve-ratio", description: "Get reserve ratio and drift from equal for a liquidity pool" },
         { method: "GET", path: "/utils/friendbot/:accountId", description: "Fund a testnet account via Friendbot (testnet only)" },
+        { method: "GET", path: "/utils/convert?xlm=:xlm", description: "Convert between XLM and stroops" },
         { method: "GET", path: "/utils/validate-account?id=:id", description: "Validate a Stellar public key format (no Horizon call)" },
         { method: "WS", path: "/stream/ledgers", description: "Real-time stream of live Stellar ledger updates" },
       ],
