@@ -4,6 +4,7 @@ const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
+
 /**
  * GET /transactions/:id
  * Returns paginated transaction history for a Stellar account.
@@ -97,13 +98,16 @@ router.get("/:id", async (req, res, next) => {
         sourceAccount: tx.source_account,
         fee: {
           charged: tx.fee_charged,
+          chargedInXLM: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
+          max: tx.max_fee,
+          maxInXLM: (parseInt(tx.max_fee, 10) / STROOPS_PER_XLM).toFixed(7),
           account: tx.fee_account,
         },
         feeSummary: {
-          chargedInStroops,
-          chargedInXLM: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
-          perOperationInStroops: perOpStroops,
-          perOperationInXLM: (perOpStroops / STROOPS_PER_XLM).toFixed(7),
+          stroops: chargedInStroops,
+          xlm: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
+          perOperationStroops: perOpStroops,
+          perOperationXLM: (perOpStroops / STROOPS_PER_XLM).toFixed(7),
         },
         operationCount: tx.operation_count,
         memoType: tx.memo_type,
@@ -113,15 +117,12 @@ router.get("/:id", async (req, res, next) => {
       };
     });
 
-    const lastRecord = txResponse.records[txResponse.records.length - 1];
-    const nextCursor = lastRecord ? lastRecord.paging_token : null;
-
     return success(res, transactions, {
       meta: {
         count: transactions.length,
         limit,
         order,
-        nextCursor,
+        nextCursor: txResponse.records.length > 0 ? txResponse.records[txResponse.records.length - 1].paging_token : null,
         hasMore: transactions.length === limit,
       },
     });
@@ -132,12 +133,14 @@ router.get("/:id", async (req, res, next) => {
 
 /**
  * GET /transactions/:id/operations
- * Returns the list of operations within each transaction for an account.
+ * Returns the list of operations within each transaction for a Stellar account.
  *
  * Query params:
- *   - limit  (number, default: 10, max: 200)
- *   - order  ("asc" | "desc", default: "desc")
- *   - cursor (string)
+ *   - limit   (number, default: 10, max: 200)
+ *   - cursor  (string, pagination cursor from previous response)
+ *   - order   ("asc" | "desc", default: "desc")
+ *
+ * @param {string} id - Stellar account public key (G...)
  *
  * @example
  * GET /transactions/GAAZI4.../operations?limit=20
@@ -199,7 +202,7 @@ router.get("/:id/operations", async (req, res, next) => {
     const opResponse = await query.call();
 
     const operations = opResponse.records.map((op) => {
-      const base = {
+      const formatted = {
         id: op.id,
         type: op.type,
         createdAt: op.created_at,
@@ -208,36 +211,25 @@ router.get("/:id/operations", async (req, res, next) => {
         sourceAccount: op.source_account,
       };
 
-      switch (op.type) {
-        case "payment":
-          return {
-            ...base,
-            amount: op.amount,
-            assetType: op.asset_type,
-            assetCode: op.asset_code || "XLM",
-            assetIssuer: op.asset_issuer || null,
-            from: op.from,
-            to: op.to,
-          };
-        case "create_account":
-          return {
-            ...base,
-            account: op.account,
-            funder: op.funder,
-            startingBalance: op.starting_balance,
-          };
-        case "change_trust":
-          return {
-            ...base,
-            assetCode: op.asset_code,
-            assetIssuer: op.asset_issuer,
-            limit: op.limit,
-            trustee: op.trustee,
-            trustor: op.trustor,
-          };
-        default:
-          return base;
+      // Add type-specific fields
+      if (op.type === "payment") {
+        formatted.assetCode = op.asset_code || "XLM";
+        formatted.assetIssuer = op.asset_issuer || "native";
+        formatted.amount = op.amount;
+        formatted.from = op.from;
+        formatted.to = op.to;
+      } else if (op.type === "create_account") {
+        formatted.startingBalance = op.starting_balance;
+        formatted.funder = op.funder;
+        formatted.account = op.account;
+      } else if (op.type === "change_trust") {
+        formatted.assetCode = op.asset_code;
+        formatted.assetIssuer = op.asset_issuer;
+        formatted.trustor = op.trustor;
+        formatted.trustee = op.trustee;
       }
+
+      return formatted;
     });
 
     const lastRecord = opResponse.records[opResponse.records.length - 1];
