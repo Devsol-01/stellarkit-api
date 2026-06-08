@@ -12,7 +12,7 @@ const rateLimiter = require("./middleware/rateLimiter");
 const contentTypeValidator = require("./middleware/contentTypeValidator");
 const bodySizeLimit = require("./middleware/bodySizeLimit");
 const errorHandler = require("./middleware/errorHandler");
-const apiKeyMiddleware = require("./middleware/apiKey");
+const apiKeyMiddleware = require("./middleware/apiKeyAuth");
 const sanitize = require("./middleware/sanitize");
 
 const networkStatusRouter = require("./routes/networkStatus");

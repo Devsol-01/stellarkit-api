@@ -18,8 +18,9 @@ const apiKeyMiddleware = (req, res, next) => {
     return next();
   }
 
-  // Get the API key from header
-  const apiKey = req.headers['x-api-key'];
+  // Get the API key from header and trim it
+  const rawApiKey = req.headers["x-api-key"];
+  const apiKey = rawApiKey ? rawApiKey.trim() : null;
 
   // Check if API key is provided
   if (!apiKey) {
