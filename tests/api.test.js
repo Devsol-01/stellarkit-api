@@ -13,11 +13,80 @@ describe("StellarKit API", () => {
 
   // ── Health ─────────────────────────────────────────────────────────────────
   describe("GET /health", () => {
-    it("returns 200 with status ok", async () => {
+    it("returns 200 with required health fields", async () => {
       const res = await request(app).get("/health");
+
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data.status).toBe("ok");
+
+      const { data } = res.body;
+      expect(data).toBeDefined();
+      expect(data.status).toBe("ok");
+      expect(data.service).toBe("StellarKit API");
+
+      // Non-empty version string
+      expect(typeof data.version).toBe("string");
+      expect(data.version.length).toBeGreaterThan(0);
+
+      // Valid ISO 8601 timestamp
+      expect(typeof data.timestamp).toBe("string");
+      const ts = new Date(data.timestamp);
+      expect(Number.isNaN(ts.getTime())).toBe(false);
+
+      // Network value must be either testnet or mainnet
+      expect(["testnet", "mainnet"]).toContain(data.network);
+    });
+  });
+
+  describe("CORS configuration", () => {
+    const originalAllowedOrigins = process.env.ALLOWED_ORIGINS;
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    afterEach(() => {
+      if (originalAllowedOrigins === undefined) {
+        delete process.env.ALLOWED_ORIGINS;
+      } else {
+        process.env.ALLOWED_ORIGINS = originalAllowedOrigins;
+      }
+
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    });
+
+    it("returns CORS headers for configured origins and supports preflight requests", async () => {
+      process.env.NODE_ENV = "production";
+      process.env.ALLOWED_ORIGINS = "https://app.example.com, https://admin.example.com";
+
+      const res = await request(app)
+        .get("/health")
+        .set("Origin", "https://app.example.com");
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["access-control-allow-origin"]).toBe("https://app.example.com");
+      expect(res.headers.vary).toContain("Origin");
+
+      const preflight = await request(app)
+        .options("/health")
+        .set("Origin", "https://admin.example.com")
+        .set("Access-Control-Request-Method", "GET");
+
+      expect(preflight.statusCode).toBe(204);
+      expect(preflight.headers["access-control-allow-origin"]).toBe("https://admin.example.com");
+    });
+
+    it("defaults to a permissive wildcard in development when no allowlist is set", async () => {
+      process.env.NODE_ENV = "development";
+      delete process.env.ALLOWED_ORIGINS;
+
+      const res = await request(app)
+        .get("/health")
+        .set("Origin", "https://example.com");
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["access-control-allow-origin"]).toBe("*");
     });
   });
 
@@ -1473,7 +1542,7 @@ describe("GET /account/:id/trustlines", () => {
     // This endpoint should be properly defined even if the account doesn't exist
     // A real account could be tested with a valid Stellar account ID
     const res = await request(app).get("/account/NOT_A_VALID_KEY/trustlines");
-    
+
     // Should get a validation error, not a 404
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);
