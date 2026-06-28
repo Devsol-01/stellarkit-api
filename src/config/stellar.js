@@ -1,5 +1,6 @@
 require("dotenv").config();
 const { Horizon } = require("@stellar/stellar-sdk");
+const { makeAccountNotFoundError } = require("../utils/errors");
 
 const NETWORK = process.env.STELLAR_NETWORK || "testnet";
 
@@ -43,11 +44,9 @@ async function fetchAccountCreation(publicKey) {
       timestamp: firstTx.created_at,
     };
   } catch (err) {
-    // Re-throw Horizon 404 as our own 404
+    // Re-throw Horizon 404 as a structured AccountNotFound error
     if (err.response && err.response.status === 404) {
-      const notFoundErr = new Error("Account not found on Stellar network.");
-      notFoundErr.status = 404;
-      throw notFoundErr;
+      throw makeAccountNotFoundError(publicKey, NETWORK);
     }
 
     // If it's already our custom error, re-throw as-is

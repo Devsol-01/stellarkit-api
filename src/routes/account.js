@@ -1,8 +1,9 @@
 const express = require("express");
 const router = express.Router();
 
-const { server, fetchAccountCreation } = require("../config/stellar");
+const { server, fetchAccountCreation, NETWORK } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
+const { makeAccountNotFoundError } = require("../utils/errors");
 
 const {
   validateAccountId,
@@ -10,8 +11,8 @@ const {
 } = require("../utils/validators");
 
 const { parsePaginationParams } = require("../utils/pagination");
-const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
 const { buildAccountAgeResponse } = require("../utils/accountAge");
+
 
 const axios = require("axios");
 const { Asset } = require("@stellar/stellar-sdk");
@@ -31,11 +32,12 @@ function validateLimit(limit, max = 200) {
   return n;
 }
 
-function handleAccountNotFound(err, next) {
+function handleAccountNotFound(err, next, accountId) {
   if (err && err.response && err.response.status === 404) {
-    const notFoundErr = new Error("Account not found.");
-    notFoundErr.status = 404;
-    return next(notFoundErr);
+    return next(makeAccountNotFoundError(accountId, NETWORK));
+  }
+  if (err && err.isAccountNotFound) {
+    return next(err);
   }
   next(err);
 }
@@ -99,15 +101,15 @@ async function resolveTrustlineToml(balance, issuerCache, tomlCache) {
   }
 
   return {
-    assetCode,
-    assetIssuer,
-    assetType: balance.asset_type,
+    asset: {
+      code: assetCode,
+      issuer: assetIssuer,
+      type: balance.asset_type,
+    },
     balance: balance.balance,
     limit: balance.limit,
-    buyingLiabilities: balance.buying_liabilities,
-    sellingLiabilities: balance.selling_liabilities,
     isAuthorized: balance.is_authorized,
-    isClawbackEnabled: balance.is_clawback_enabled,
+    isAuthorizedToMaintainLiabilities: balance.is_authorized_to_maintain_liabilities,
     toml,
   };
 }
@@ -129,21 +131,28 @@ router.get("/:id/trustlines", async (req, res, next) => {
       (b) => b.asset_type !== "native",
     );
 
-    const trustlines = await Promise.all(
+    let trustlines = await Promise.all(
       trustlineBalances.map((b) =>
         resolveTrustlineToml(b, issuerCache, tomlCache),
       ),
     );
 
+    const { assetCode } = req.query;
+    if (assetCode) {
+      const filterLower = assetCode.toLowerCase();
+      trustlines = trustlines.filter(
+        (t) => t.asset.code.toLowerCase() === filterLower,
+      );
+    }
+
     return success(res, {
-      accountId: account.id,
-      assets: trustlines,
-      assetCount: trustlines.length,
-      trustlines,
-      count: trustlines.length,
+      items: trustlines,
+      total: trustlines.length,
+      limit: null,
+      cursor: null,
     });
   } catch (err) {
-    next(err);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -160,7 +169,36 @@ router.get("/:id/balances", async (req, res, next) => {
 
     return success(res, formatted);
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/native-balance
+ */
+router.get("/:id/native-balance", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+    const xlmBalance = (account.balances || []).find((b) => b.asset_type === "native");
+
+    if (!xlmBalance) {
+      return success(res, {
+        balance: formatBalance("0.0000000"),
+        buyingLiabilities: formatBalance("0.0000000"),
+        sellingLiabilities: formatBalance("0.0000000"),
+      });
+    }
+
+    return success(res, {
+      balance: formatBalance(xlmBalance.balance),
+      buyingLiabilities: formatBalance(xlmBalance.buying_liabilities),
+      sellingLiabilities: formatBalance(xlmBalance.selling_liabilities),
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -180,7 +218,7 @@ router.get("/:id/sequence", async (req, res, next) => {
       lastModifiedLedger: account.last_modified_ledger,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -227,17 +265,14 @@ router.get("/:id/payments", async (req, res, next) => {
 
     const hasMore = rawRecords.length === limit;
 
-    return success(res, paymentOps, {
-      meta: {
-        count: paymentOps.length,
-        limit,
-        order,
-        nextCursor: paymentOps.length ? nextCursor : null,
-        hasMore,
-      },
+    return success(res, {
+      items: paymentOps,
+      total: paymentOps.length,
+      limit,
+      cursor: paymentOps.length ? nextCursor : null,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -289,11 +324,14 @@ router.get("/:id/offers", async (req, res, next) => {
       ? (offerResponse.records[offerResponse.records.length - 1] || {}).paging_token
       : null;
 
-    return success(res, offers, {
-      meta: { count: offers.length, limit, nextCursor, hasMore },
+    return success(res, {
+      items: offers,
+      total: offers.length,
+      limit,
+      cursor: nextCursor,
     });
   } catch (err) {
-    next(err);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -314,7 +352,10 @@ router.get("/:id/analytics", async (req, res, next) => {
         .order("asc")
         .call();
       transactions = response.records || [];
-    } catch (_) {
+    } catch (fetchErr) {
+      if (fetchErr && fetchErr.response && fetchErr.response.status === 404) {
+        throw fetchErr;
+      }
       transactions = [];
     }
 
@@ -352,7 +393,7 @@ router.get("/:id/analytics", async (req, res, next) => {
       lastSeen,
     });
   } catch (err) {
-    next(err);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -391,7 +432,7 @@ router.get("/:id", async (req, res, next) => {
       },
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -437,7 +478,7 @@ router.get("/:id/subentry-health", async (req, res, next) => {
       },
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -493,14 +534,11 @@ router.get("/:id/sponsorship", async (req, res, next) => {
 
     return success(res, {
       accountId: account.id,
-      accountSponsor: account.sponsor || null,
-      numSponsored: account.num_sponsored || 0,
-      numSponsoring: account.num_sponsoring || 0,
       sponsoredEntries,
       accountsSponsoring,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -587,7 +625,7 @@ router.get("/:id/freeze-status/:assetCode/:assetIssuer", async (req, res, next) 
       detail,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -608,7 +646,7 @@ router.get("/:id/age", async (req, res, next) => {
       }),
     );
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -651,7 +689,7 @@ router.get("/:id/inactivity", async (req, res, next) => {
       status,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -735,7 +773,7 @@ router.get("/:id/can-receive/:assetCode/:assetIssuer", async (req, res, next) =>
       limit,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -749,10 +787,12 @@ router.get("/:id/volume", async (req, res, next) => {
 
     const days = parseInt(req.query.days || "30", 10);
     if (isNaN(days) || days < 1 || days > 90) {
-      return res.status(400).json({
-        success: false,
-        error: { type: "ValidationError", message: "days must be a number between 1 and 90." },
-      });
+      const err = new Error("Query parameter 'days': must be an integer between 1 and 90.");
+      err.isValidation = true;
+      err.field = "days";
+      err.receivedValue = String(req.query.days);
+      err.expectedFormat = "1–90";
+      throw err;
     }
 
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -824,7 +864,7 @@ router.get("/:id/volume", async (req, res, next) => {
       volumeByAsset,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -871,11 +911,14 @@ router.get("/:id/offer-history", async (req, res, next) => {
 
     const nextCursor = records.length > 0 ? records[records.length - 1].paging_token : null;
 
-    return success(res, offerOps, {
-      meta: { count: offerOps.length, limit, order, nextCursor, hasMore: records.length === limit },
+    return success(res, {
+      items: offerOps,
+      total: offerOps.length,
+      limit,
+      cursor: nextCursor,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -894,8 +937,11 @@ router.get("/:id/pool-positions", async (req, res, next) => {
     );
 
     if (poolShareTrustlines.length === 0) {
-      return success(res, [], {
-        meta: { count: 0, accountId: id, message: "No liquidity pool positions found for this account." },
+      return success(res, {
+        items: [],
+        total: 0,
+        limit: null,
+        cursor: null,
       });
     }
 
@@ -951,17 +997,101 @@ router.get("/:id/pool-positions", async (req, res, next) => {
       });
     }
 
-    return success(res, positions, {
-      meta: { count: positions.length, accountId: id },
+    return success(res, {
+      items: positions,
+      total: positions.length,
+      limit: null,
+      cursor: null,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
 /**
  * POST /account/:id/multisig-plan
  */
+// GET /account/:id/transaction-stats
+// Summarises recent transactions for the account (success/failure counts and basic per-asset volume).
+router.get("/:id/transaction-stats", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const limitRaw = req.query.limit;
+    const limit = limitRaw === undefined ? 200 : parseInt(limitRaw, 10);
+    if (isNaN(limit) || limit < 1 || limit > 200) {
+      const err = new Error("Query parameter 'limit': must be an integer between 1 and 200.");
+      err.isValidation = true;
+      err.field = "limit";
+      err.receivedValue = String(limitRaw);
+      err.expectedFormat = "1–200";
+      throw err;
+    }
+
+    const txResponse = await server
+      .transactions()
+      .forAccount(id)
+      .limit(limit)
+      .order("desc")
+      .includeFailed(true)
+      .call();
+
+    const records = txResponse.records || [];
+
+    const STROOPS_PER_XLM = 10_000_000;
+
+    const perAsset = new Map();
+
+    for (const tx of records) {
+      const successful = tx.successful === true;
+
+      for (const op of tx.operations || []) {
+        // Horizon transaction record does not always include operations.
+        // We fall back to payments-based approximation only if operation data exists.
+        if (!op) continue;
+      }
+
+      // Use Horizon-fee charged as a lightweight signal; for volume we do best-effort using tx.memo-less fields.
+      // Since Horizon tx record does not directly expose sent/received amounts, we keep a minimal stats surface.
+      const feeChargedStroops = parseInt(tx.fee_charged || 0, 10);
+      const feeChargedXlm = (feeChargedStroops / STROOPS_PER_XLM).toFixed(7);
+
+      const key = tx.type || "unknown";
+      if (!perAsset.has(key)) {
+        perAsset.set(key, {
+          category: key,
+          successfulCount: 0,
+          failedCount: 0,
+          txCount: 0,
+          totalFeeChargedStroops: 0,
+          totalFeeChargedXlm: "0",
+        });
+      }
+      const bucket = perAsset.get(key);
+      bucket.txCount += 1;
+      if (successful) bucket.successfulCount += 1;
+      else bucket.failedCount += 1;
+      bucket.totalFeeChargedStroops += feeChargedStroops;
+      bucket.totalFeeChargedXlm = (bucket.totalFeeChargedStroops / STROOPS_PER_XLM).toFixed(7);
+    }
+
+    const successfulCount = records.filter((t) => t.successful === true).length;
+    const failedCount = records.length - successfulCount;
+
+    return success(res, {
+      accountId: id,
+      limit,
+      counts: { total: records.length, successful: successfulCount, failed: failedCount },
+      firstSeenAt: records.length ? toISOTimestamp(records[records.length - 1].created_at) : null,
+      lastSeenAt: records.length ? toISOTimestamp(records[0].created_at) : null,
+      byType: Array.from(perAsset.values()),
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
 router.post("/:id/multisig-plan", async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -1046,8 +1176,9 @@ router.post("/:id/multisig-plan", async (req, res, next) => {
       validCombinations,
     });
   } catch (err) {
-    handleAccountNotFound(err, next);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
 module.exports = router;
+

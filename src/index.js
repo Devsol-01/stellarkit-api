@@ -7,11 +7,14 @@ const morgan = require("morgan");
 const compression = require("compression");
 
 const { setupWebSocket } = require("./websocket");
+const { server } = require("./config/stellar");
+const cacheService = require("./services/cache");
 
 const rateLimiter = require("./middleware/rateLimiter");
 const contentTypeValidator = require("./middleware/contentTypeValidator");
 const bodySizeLimit = require("./middleware/bodySizeLimit");
 const errorHandler = require("./middleware/errorHandler");
+const requestIdMiddleware = require("./middleware/requestId");
 const apiKeyMiddleware = require("./middleware/apiKeyAuth");
 const sanitize = require("./middleware/sanitize");
 
@@ -26,18 +29,138 @@ const streamRouter = require("./routes/stream");
 const utilsRouter = require("./routes/utils");
 const stellarTomlRouter = require("./routes/stellarToml");
 const claimableBalancesRouter = require("./routes/claimableBalances");
+const cacheStatsRouter = require("./routes/cacheStats");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+async function warmNetworkStatusCache({ logger = console, horizonServer = server } = {}) {
+  const ledger = await horizonServer.ledgers().order("desc").limit(1).call();
+  const latest = ledger.records[0];
+
+  const data = {
+    network: process.env.STELLAR_NETWORK || "testnet",
+    horizonUrl: require("./config/stellar").horizonUrl,
+    latestLedger: {
+      sequence: latest.sequence,
+      closedAt: latest.closed_at,
+      transactionCount: latest.successful_transaction_count,
+      operationCount: latest.operation_count,
+      totalCoins: latest.total_coins,
+      feePool: latest.fee_pool,
+    },
+    fees: {
+      baseFeeInStroops: latest.base_fee_in_stroops,
+      baseFeeInXLM: (latest.base_fee_in_stroops / 1e7).toFixed(7),
+      basereserveInStroops: latest.base_reserve_in_stroops,
+      baseReserveInXLM: (latest.base_reserve_in_stroops / 1e7).toFixed(7),
+    },
+    protocol: {
+      version: latest.protocol_version,
+    },
+  };
+
+  cacheService.set("network-status", data);
+  logger.log("[CACHE WARM] /network-status");
+}
+
+async function warmFeeEstimateCache({ logger = console, horizonServer = server } = {}) {
+  const feeStats = await horizonServer.feeStats();
+  const operations = 1;
+
+  const base = parseInt(feeStats.fee_charged.p10);
+  const recommended = parseInt(feeStats.fee_charged.p50);
+  const priority = parseInt(feeStats.fee_charged.p95);
+
+  const data = {
+    note: `Fee estimates for a transaction with ${operations} operation(s). Fees are in stroops (1 XLM = 10,000,000 stroops).`,
+    operationCount: operations,
+    perOperation: {
+      economy: {
+        stroops: parseInt(feeStats.fee_charged.min),
+        xlm: (parseInt(feeStats.fee_charged.min) / 1e7).toFixed(7),
+        description: "Minimum — may be slow during congestion",
+      },
+      standard: {
+        stroops: recommended,
+        xlm: (recommended / 1e7).toFixed(7),
+        description: "Recommended for most transactions",
+      },
+      priority: {
+        stroops: priority,
+        xlm: (priority / 1e7).toFixed(7),
+        description: "Fast inclusion even during high network load",
+      },
+    },
+    totalFee: {
+      economy: {
+        stroops: parseInt(feeStats.fee_charged.min) * operations,
+        xlm: ((parseInt(feeStats.fee_charged.min) * operations) / 1e7).toFixed(7),
+      },
+      standard: {
+        stroops: recommended * operations,
+        xlm: ((recommended * operations) / 1e7).toFixed(7),
+      },
+      priority: {
+        stroops: priority * operations,
+        xlm: ((priority * operations) / 1e7).toFixed(7),
+      },
+    },
+    networkStats: {
+      lastLedgerBaseFee: feeStats.last_ledger_base_fee,
+      ledgerCapacityUsage: feeStats.ledger_capacity_usage,
+      maxFeeCharged: feeStats.fee_charged.max,
+      p10: feeStats.fee_charged.p10,
+      p50: feeStats.fee_charged.p50,
+      p95: feeStats.fee_charged.p95,
+      p99: feeStats.fee_charged.p99,
+    },
+  };
+
+  cacheService.set("fee-estimate:1", data);
+  logger.log("[CACHE WARM] /fee-estimate");
+}
+
+async function warmStartupCaches({ logger = console, horizonServer = server } = {}) {
+  const warmers = [
+    warmNetworkStatusCache({ logger, horizonServer }),
+    warmFeeEstimateCache({ logger, horizonServer }),
+  ];
+
+  const results = await Promise.allSettled(warmers);
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      const endpoint = index === 0 ? "/network-status" : "/fee-estimate";
+      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      logger.error(`[CACHE WARM] failed ${endpoint}: ${reason}`);
+    }
+  });
+}
+
 // ── Security & Parsing ──────────────────────────────────────────────────────
 app.use(helmet());
-app.use(compression({ threshold: 0 }));
+// Skip compression for responses smaller than 1 KB — gzip headers alone can exceed tiny payloads
+app.use(compression({ threshold: 1024 }));
 app.use(cors());
+app.use(requestIdMiddleware);
 app.use(contentTypeValidator);
 app.use(bodySizeLimit);
 app.use(hpp({ whitelist: ["limit", "order", "cursor", "operations"] }));
-app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+app.use(
+  morgan(function (tokens, req, res) {
+    const requestId = req.requestId || "-";
+    return [
+      `[${requestId}]`,
+      tokens.method(req, res),
+      tokens.url(req, res),
+      tokens.status(req, res),
+      tokens.res(req, res, "content-length"),
+      "-",
+      tokens["response-time"](req, res),
+      "ms",
+    ].join(" ");
+  })
+);
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────
 app.use(rateLimiter);
@@ -76,6 +199,7 @@ app.use("/stream", streamRouter);
 app.use("/utils", utilsRouter);
 app.use("/stellar-toml", stellarTomlRouter);
 app.use("/claimable-balances", claimableBalancesRouter);
+app.use("/cache", cacheStatsRouter);
 
 // ── Root ─────────────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
@@ -136,6 +260,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/utils/convert?xlm=:xlm", description: "Convert between XLM and stroops" },
         { method: "GET", path: "/utils/validate-account?id=:id", description: "Validate a Stellar public key format (no Horizon call)" },
         { method: "WS", path: "/stream/ledgers", description: "Real-time stream of live Stellar ledger updates" },
+        { method: "GET", path: "/cache/stats", description: "Cache hit rate and performance statistics" },
       ],
       docs: "https://github.com/stellarkit-lab-devtools/stellarkit-api#readme",
     },
@@ -157,13 +282,24 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 // ── Start ────────────────────────────────────────────────────────────────────
-if (require.main === module) {
-  const server = app.listen(PORT, () => {
-    console.log(`\n🚀 StellarKit API running on port ${PORT}`);
-    console.log(`🌐 Network : ${process.env.STELLAR_NETWORK || "testnet"}`);
-    console.log(`📖 Docs    : http://localhost:${PORT}/\n`);
+function startServer({ appInstance = app, port = PORT, logger = console, setupWebSocketHook = setupWebSocket } = {}) {
+  const httpServer = appInstance.listen(port, () => {
+    logger.log(`\n🚀 StellarKit API running on port ${port}`);
+    logger.log(`🌐 Network : ${process.env.STELLAR_NETWORK || "testnet"}`);
+    logger.log(`📖 Docs    : http://localhost:${port}/\n`);
+
+    warmStartupCaches({ logger }).catch((err) => {
+      logger.error(`[CACHE WARM] startup warmup failed: ${err.message}`);
+    });
   });
-  setupWebSocket(server);
+
+  setupWebSocketHook(httpServer);
+  return httpServer;
+}
+
+if (require.main === module) {
+  startServer();
 }
 
 module.exports = app;
+module.exports.startServer = startServer;
