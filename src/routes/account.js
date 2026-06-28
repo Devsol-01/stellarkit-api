@@ -232,6 +232,14 @@ router.get("/:id/payments", async (req, res, next) => {
 
     const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
+    // Optional asset filters — both are independently optional:
+    //   ?assetCode=USDC              → match any issuer of USDC
+    //   ?assetCode=USDC&assetIssuer=GA... → exact asset match
+    const filterCode = req.query.assetCode
+      ? req.query.assetCode.toUpperCase()
+      : null;
+    const filterIssuer = req.query.assetIssuer || null;
+
     let query = server.operations().forAccount(id).limit(limit).order(order);
     if (cursor) query = query.cursor(cursor);
 
@@ -242,12 +250,21 @@ router.get("/:id/payments", async (req, res, next) => {
     rawRecords.forEach((op) => {
       if (op.type === "payment" || op.type === "create_account") {
         const isPayment = op.type === "payment";
+        const assetCode = isPayment ? op.asset_code || "XLM" : "XLM";
+        const assetIssuer = isPayment ? op.asset_issuer || null : null;
+
+        // Apply assetCode filter (case-insensitive, already uppercased above)
+        if (filterCode && assetCode.toUpperCase() !== filterCode) return;
+
+        // Apply assetIssuer filter only when both params are provided
+        if (filterCode && filterIssuer && assetIssuer !== filterIssuer) return;
+
         paymentOps.push({
           type: op.type,
           amount: isPayment ? op.amount : op.starting_balance,
           asset: {
-            code: isPayment ? op.asset_code || "XLM" : "XLM",
-            issuer: isPayment ? op.asset_issuer || null : null,
+            code: assetCode,
+            issuer: assetIssuer,
             type: isPayment ? op.asset_type || "native" : "native",
           },
           sender: isPayment ? op.from : op.funder,
@@ -262,8 +279,6 @@ router.get("/:id/payments", async (req, res, next) => {
       rawRecords[lastIdx] && rawRecords[lastIdx].paging_token
         ? rawRecords[lastIdx].paging_token
         : null;
-
-    const hasMore = rawRecords.length === limit;
 
     return success(res, {
       items: paymentOps,
@@ -292,6 +307,7 @@ router.get("/:id/offers", async (req, res, next) => {
 
     const offerResponse = await query.call();
     const offers = (offerResponse.records || []).map((offer) => {
+      // Normalise asset fields to a consistent camelCase shape.
       const buildAsset = (assetType, assetCode, assetIssuer) => {
         if (assetType === "native") {
           return { assetType: "native", assetCode: "XLM", assetIssuer: null };
@@ -299,22 +315,36 @@ router.get("/:id/offers", async (req, res, next) => {
         return { assetType, assetCode, assetIssuer };
       };
 
+      // Derive a single decimal price string from price_r (n/d fraction) when
+      // available, falling back to the pre-computed price string from Horizon.
+      // Always format to 7 decimal places for consistency with other amounts.
+      let priceDecimal;
+      if (offer.price_r && offer.price_r.d && Number(offer.price_r.d) !== 0) {
+        priceDecimal = (Number(offer.price_r.n) / Number(offer.price_r.d)).toFixed(7);
+      } else {
+        priceDecimal = parseFloat(offer.price || "0").toFixed(7);
+      }
+
       return {
         id: offer.id,
+        seller: offer.seller,
         selling: {
           ...buildAsset(
             offer.selling_asset_type,
             offer.selling_asset_code,
             offer.selling_asset_issuer,
           ),
-          amount: offer.amount,
+          // Format to 7 decimal places (Stellar precision standard)
+          amount: parseFloat(offer.amount || "0").toFixed(7),
         },
         buying: buildAsset(
           offer.buying_asset_type,
           offer.buying_asset_code,
           offer.buying_asset_issuer,
         ),
-        price: offer.price,
+        // price is a 7-decimal string derived from the price_r fraction
+        price: priceDecimal,
+        // camelCase rename of last_modified_ledger
         lastModifiedLedger: offer.last_modified_ledger,
       };
     });
