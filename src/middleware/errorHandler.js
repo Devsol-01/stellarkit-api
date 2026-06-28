@@ -115,6 +115,20 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  // AssetNotFound errors (asset lookup returned no results)
+  if (err.isAssetNotFound) {
+    logError(404, req, err.message);
+    return res.status(404).json({
+      success: false,
+      error: {
+        type: "AssetNotFound",
+        message: err.message,
+        suggestion:
+          "Verify the asset code and issuer address are correct.",
+      },
+    });
+  }
+
   // InvalidAsset errors — thrown by validateAsset(code, issuer)
   if (err.isInvalidAsset) {
     logError(400, req, err.message);

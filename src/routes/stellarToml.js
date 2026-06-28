@@ -1,8 +1,10 @@
 const express = require("express");
 const { success } = require("../utils/response");
 const { fetchStellarToml } = require("../utils/tomlResolver");
+const registerParamValidation = require("../middleware/validateRouteParams");
 
 const router = express.Router();
+registerParamValidation(router);
 
 function validateDomain(domain) {
   if (!domain || typeof domain !== "string" || domain.trim() === "") {
