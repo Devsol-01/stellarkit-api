@@ -261,6 +261,23 @@ export interface AccountResponse {
 }
 
 /**
+ * Response from GET /account/:id/age
+ * Returns account age and longevity metrics for trust and reputation systems.
+ */
+export interface AccountAgeResponse {
+  success: true
+  data: {
+    publicKey: StellarPublicKey
+    createdAtLedger: number
+    createdAt: ISOTimestamp
+    ageInDays: number
+    ageInMonths: number
+    ageInYears: number
+    maturity: 'new' | 'established' | 'veteran'
+  }
+}
+
+/**
  * Response from GET /account/:id/balances
  * Returns only native XLM and asset balances for a Stellar account.
  */
@@ -347,6 +364,15 @@ export interface FeeEstimateResponse {
       p95: string
       p99: string
     }
+    history: Array<{
+      ledger: number
+      baseFee: number
+      capacityUsage: number
+    }>
+    // Human-friendly additions
+    context: string
+    networkCongestion: 'low' | 'medium' | 'high'
+    recommendation: string
   }
 }
 
@@ -421,6 +447,103 @@ export interface HealthResponse {
   }
 }
 
+/**
+ * Liquidity pool position information
+ */
+export interface PoolPosition {
+  poolId: string
+  shares: StellarAmount
+  sharePercent: string
+  totalPoolShares: StellarAmount
+  reserveA: {
+    asset: string
+    totalAmount: StellarAmount
+    equivalentAmount: StellarAmount
+  }
+  reserveB: {
+    asset: string
+    totalAmount: StellarAmount
+    equivalentAmount: StellarAmount
+  }
+  feeBp: number
+  totalTrustlines: number
+  lastModifiedLedger: number
+}
+
+/**
+ * Response from GET /account/:id/pool-positions
+ * Returns all liquidity pool positions for an account with calculated share values.
+ */
+export interface PoolPositionsResponse {
+  success: true
+  data: PoolPosition[]
+  meta: {
+    count: number
+    accountId: StellarPublicKey
+    message?: string
+  }
+}
+
+/**
+ * Response from GET /account/:id/transactions/search
+ * Returns transactions filtered by memo content.
+ */
+export interface TransactionSearchResponse {
+  success: true
+  data: TransactionRecord[]
+  meta: {
+    count: number
+    limit: number
+    order: 'asc' | 'desc'
+    searchQuery: {
+      memo: string
+      memoType: 'text' | 'id' | 'hash' | 'return' | 'any'
+    }
+    nextCursor: string | null
+    hasMore: boolean
+  }
+}
+
+/**
+ * Query parameters for GET /account/:id/transactions/search
+ */
+export interface TransactionSearchParams {
+  memo: string
+  memo_type?: 'text' | 'id' | 'hash' | 'return'
+  limit?: number
+  cursor?: string
+  order?: 'asc' | 'desc'
+}
+
+/**
+ * Response from GET /dex/spread/:sellAsset/:buyAsset
+ * Returns bid-ask spread data for a DEX trading pair.
+ */
+export interface SpreadResponse {
+  success: true
+  data: {
+    bestBid: {
+      price: StellarAmount
+      amount: StellarAmount
+    } | null
+    bestAsk: {
+      price: StellarAmount
+      amount: StellarAmount
+    } | null
+    spreadAbsolute: StellarAmount | null
+    spreadPercent: string | null
+    midPrice: StellarAmount | null
+    liquidity: 'high' | 'medium' | 'low'
+    orderBookDepth: {
+      bids: number
+      asks: number
+      totalBidVolume: StellarAmount
+      totalAskVolume: StellarAmount
+      totalVolume: StellarAmount
+    }
+  }
+}
+
 // ============================================================
 // REQUEST PARAMETER TYPES
 // ============================================================
@@ -463,10 +586,75 @@ export interface AssetSearchParams {
   limit?: number
 }
 
+/**
+ * Response from GET /account/:id/signers (derived from GET /account/:id)
+ * Returns the list of signers and thresholds for a Stellar account.
+ */
+export interface AccountSignersResponse {
+  success: true
+  data: {
+    accountId: StellarPublicKey
+    signers: Signer[]
+    thresholds: Thresholds
+  }
+}
+
+/**
+ * Single trustline entry with optional TOML metadata
+ */
+export interface TrustlineEntry {
+  assetCode: string
+  assetIssuer: StellarPublicKey
+  assetType: 'credit_alphanum4' | 'credit_alphanum12'
+  balance: StellarAmount
+  limit: StellarAmount
+  buyingLiabilities: StellarAmount
+  sellingLiabilities: StellarAmount
+  isAuthorized: boolean
+  isClawbackEnabled: boolean
+  toml: unknown | null
+}
+
+/**
+ * Response from GET /account/:id/trustlines
+ * Returns all trustlines for an account with resolved TOML metadata.
+ */
+export interface AccountTrustlinesResponse {
+  success: true
+  data: TrustlineEntry[]
+  meta: {
+    count: number
+    accountId: StellarPublicKey
+  }
+}
+
+/**
+ * A single risk factor contributing to an account's risk score
+ */
+export interface RiskFactor {
+  name: string
+  value: string
+  impact: 'positive' | 'negative' | 'neutral'
+  detail: string
+}
+
+/**
+ * Response from GET /account/:id/risk-score
+ * Returns a computed risk score and contributing factors for a Stellar account.
+ */
+export interface AccountRiskScoreResponse {
+  success: true
+  data: {
+    accountId: StellarPublicKey
+    score: number
+    label: string
+    factors: RiskFactor[]
+  }
+}
+
 // ============================================================
 // MODULE DECLARATION
 // ============================================================
 
 declare module 'stellarkit-api' {
-  export * from '.'
 }

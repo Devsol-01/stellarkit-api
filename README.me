@@ -4,9 +4,9 @@ StellarKit API
 Overview
 --------
 
-StellarKit API is an open source developer utility service built to provide a friendly REST interface on top of the Stellar Horizon blockchain network. It is implemented using Express.js and the official `@stellar/stellar-sdk` library, and it is designed to expose useful Stellar features including account details, transaction history, network health, fee estimates, and asset metadata.
+StellarKit API is a lightweight REST service that wraps the Stellar Horizon API and delivers clean, typed blockchain data for applications and services. Built with Express and the official `@stellar/stellar-sdk`, it simplifies account lookups, fee estimation, transaction history, network status, and asset metadata so developers can integrate Stellar faster without Horizon complexity.
 
-This repository is aimed at developers who want to integrate Stellar data into web, mobile, or backend applications without having to work directly with the Horizon API. Instead of consuming Horizon responses directly, application teams can interact with a normalized, opinionated, and documented API that is easier to use in production systems.
+This repository is ideal for web and mobile apps, wallets, analytics dashboards, and backend services that need reliable Stellar data through a normalized, easy-to-use API.
 
 Project Goals
 -------------
@@ -343,11 +343,11 @@ Utility Modules
 
 Several utility modules help keep the code clean and reusable.
 
-### `src/utils/cache.js`
+### `src/services/cache.js`
 
-This module provides in-memory caching logic for expensive or frequently repeated requests. Since Stellar data such as network status changes slowly, caching can reduce Horizon API calls and improve performance.
+This module provides a centralised in-memory TTL cache service using the `node-cache` package. It is used to cache Horizon responses and other frequently requested data, reducing network calls and improving API performance.
 
-The cache utilities can be used in route handlers to store responses for a short period of time and serve them faster for subsequent requests.
+The cache service provides methods like `get(key)`, `set(key, value, ttlSeconds)`, `delete(key)`, and `flush()`. Routes such as network status and fee estimates leverage this service to serve responses faster.
 
 ### `src/utils/formatTransaction.js`
 
