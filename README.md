@@ -39,6 +39,12 @@ This project is ideal for:
 
 ---
 
+## Documentation
+
+- [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+
+---
+
 ## API Reference
 
 ### Network
@@ -49,6 +55,7 @@ This project is ideal for:
 | GET | `/health` | Service health check | — |
 | GET | `/network-status` | Latest ledger, fees, and protocol info | `fresh` |
 | GET | `/network/ledger-timing` | Analyze ledger close time consistency | — |
+| GET | `/network/validators` | Current validator list grouped by organisation | `fresh` |
 
 ### Fees
 
