@@ -3,7 +3,6 @@
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  * All non-Horizon errors are wrapped in StellarKitError for consistency.
  */
-const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
 const StellarKitError = require("../utils/StellarKitError");
 
@@ -41,7 +40,7 @@ function errorHandler(err, req, res, next) {
 
     const message = horizonError.detail || horizonError.title || "Horizon Error";
     const code = resultCode;
-    const humanMessage = code ? translateHorizonError(code) : null;
+    // TODO: wire up translateHorizonError — see issue #22
     logError(status, req, message);
     return res.status(status).json({
       success: false,
