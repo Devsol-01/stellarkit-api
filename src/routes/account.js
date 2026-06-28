@@ -3,7 +3,7 @@ const router = express.Router();
 
 const { server, fetchAccountCreation, NETWORK } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
-const { makeAccountNotFoundError } = require("../utils/errors");
+const { makeAccountNotFoundError, makeClaimableBalanceNotFoundError } = require("../utils/errors");
 
 const {
   validateAccountId,
@@ -1182,6 +1182,68 @@ router.post("/:id/multisig-plan", async (req, res, next) => {
       highThreshold: thresholds.high_threshold,
       signerWeights,
       validCombinations,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/claimable-balances
+ */
+router.get("/:id/claimable-balances", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const limit = req.query.limit ? validateLimit(req.query.limit) : 200;
+    const cursor = req.query.cursor || undefined;
+
+    let query = server.claimableBalances().claimant(id).limit(limit);
+    if (cursor) {
+      query = query.cursor(cursor);
+    }
+
+    const response = await query.call();
+
+    const claimableBalances = (response.records || []).map((balance) => ({
+      id: balance.id,
+      asset: balance.asset,
+      amount: balance.amount,
+      claimants: balance.claimants,
+      predicate: balance.predicate,
+      lastModifiedLedger: balance.last_modified_ledger,
+      lastModifiedTime: balance.last_modified_time,
+    }));
+
+    return success(res, {
+      items: claimableBalances,
+      total: claimableBalances.length,
+      cursor: response.next_cursor || null,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/data
+ */
+router.get("/:id/data", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    const dataEntries = Object.entries(account.data || {}).map(([key, value]) => ({
+      key,
+      value,
+    }));
+
+    return success(res, {
+      items: dataEntries,
+      total: dataEntries.length,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
