@@ -5,7 +5,17 @@ import type {
   AccountSignersResponse,
   AccountAgeResponse,
   AccountRiskScoreResponse,
+  TrustlineEntry,
+  PaymentOperation,
 } from "../types/index.d";
+
+/** Paginated response returned by list endpoints. */
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  cursor: string | null;
+}
 
 /** Typed error thrown by AccountModule on non-2xx API responses. */
 export class StellarKitError extends Error {
@@ -85,11 +95,50 @@ export class AccountModule {
    * Get all trustlines for an account with TOML metadata resolved from issuer home domains.
    *
    * @param id - Stellar account public key.
+   * @param options - Optional filtering options.
+   * @param options.assetCode - Filter trustlines by asset code (e.g. "USDC").
    * @returns Resolves to an array of trustline entries.
    * @throws {StellarKitError} On non-2xx response.
+   *
+   * @example
+   * const trustlines = await account.getTrustlines("GAAZI4...");
+   * const usdcOnly = await account.getTrustlines("GAAZI4...", { assetCode: "USDC" });
    */
-  async getTrustlines(id: string): Promise<AccountTrustlinesResponse["data"]> {
-    return this._get<AccountTrustlinesResponse["data"]>(`/account/${id}/trustlines`);
+  async getTrustlines(
+    id: string,
+    options?: { assetCode?: string },
+  ): Promise<TrustlineEntry[]> {
+    const params = new URLSearchParams();
+    if (options?.assetCode) params.set("asset_code", options.assetCode);
+    const query = params.toString();
+    const path = `/account/${id}/trustlines${query ? `?${query}` : ""}`;
+    return this._get<TrustlineEntry[]>(path);
+  }
+
+  /**
+   * Get payment and create_account operations for an account.
+   *
+   * @param id - Stellar account public key.
+   * @param options - Optional pagination options.
+   * @param options.limit - Maximum number of records to return.
+   * @param options.cursor - Pagination cursor from a previous response.
+   * @returns Resolves to a paginated response containing payment operations.
+   * @throws {StellarKitError} On non-2xx response.
+   *
+   * @example
+   * const payments = await account.getPayments("GAAZI4...");
+   * const page2 = await account.getPayments("GAAZI4...", { limit: 10, cursor: "12345" });
+   */
+  async getPayments(
+    id: string,
+    options?: { limit?: number; cursor?: string },
+  ): Promise<PaginatedResponse<PaymentOperation>> {
+    const params = new URLSearchParams();
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.cursor) params.set("cursor", options.cursor);
+    const query = params.toString();
+    const path = `/account/${id}/payments${query ? `?${query}` : ""}`;
+    return this._get<PaginatedResponse<PaymentOperation>>(path);
   }
 
   /**

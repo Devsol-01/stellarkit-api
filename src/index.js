@@ -30,6 +30,7 @@ const utilsRouter = require("./routes/utils");
 const stellarTomlRouter = require("./routes/stellarToml");
 const claimableBalancesRouter = require("./routes/claimableBalances");
 const cacheStatsRouter = require("./routes/cacheStats");
+const networkRouter = require("./routes/network");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -200,6 +201,7 @@ app.use("/utils", utilsRouter);
 app.use("/stellar-toml", stellarTomlRouter);
 app.use("/claimable-balances", claimableBalancesRouter);
 app.use("/cache", cacheStatsRouter);
+app.use("/network", networkRouter);
 
 // ── Root ─────────────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
@@ -251,6 +253,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/dex/imbalance/:sellAsset/:buyAsset", description: "Detect buy/sell pressure imbalance on a trading pair" },
         { method: "GET", path: "/account/:id/counterparties", description: "Analyze frequent payment counterparties for an account" },
         { method: "GET", path: "/network/ledger-timing", description: "Analyze network ledger close time consistency" },
+        { method: "GET", path: "/network/validators", description: "Current validator list grouped by organisation" },
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
 
         { method: "GET", path: "/dex/price/:sellAsset/:buyAsset", description: "Calculate effective exchange rate via best DEX payment path" },

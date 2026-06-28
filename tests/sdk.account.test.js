@@ -50,7 +50,21 @@ try {
     }
     getAccount(id) { return this._get(`/account/${id}`); }
     getBalances(id) { return this._get(`/account/${id}/balances`); }
-    getTrustlines(id) { return this._get(`/account/${id}/trustlines`); }
+    getTrustlines(id, options) {
+      const params = new URLSearchParams();
+      if (options?.assetCode) params.set("asset_code", options.assetCode);
+      const query = params.toString();
+      const path = `/account/${id}/trustlines${query ? `?${query}` : ""}`;
+      return this._get(path);
+    }
+    getPayments(id, options) {
+      const params = new URLSearchParams();
+      if (options?.limit !== undefined) params.set("limit", String(options.limit));
+      if (options?.cursor) params.set("cursor", options.cursor);
+      const query = params.toString();
+      const path = `/account/${id}/payments${query ? `?${query}` : ""}`;
+      return this._get(path);
+    }
     async getSigners(id) {
       const account = await this._get(`/account/${id}`);
       return { accountId: account.accountId, signers: account.signers, thresholds: account.thresholds };
@@ -126,6 +140,22 @@ const RISK_DATA = {
   score: 75,
   label: "low",
   factors: [{ name: "Account Age", value: "365 days", impact: "positive", detail: "Over a year old." }],
+};
+
+const PAYMENTS_DATA = {
+  items: [
+    {
+      type: "payment",
+      amount: "10.0000000",
+      asset: { code: "XLM", issuer: null, type: "native" },
+      sender: ACCOUNT_ID,
+      receiver: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      createdAt: "2024-01-01T00:00:00Z",
+    },
+  ],
+  total: 1,
+  limit: 10,
+  cursor: "12345",
 };
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -237,6 +267,53 @@ describe("AccountModule", () => {
     it("throws StellarKitError on failure", async () => {
       mockFetch(500, { success: false, error: { message: "Server error", type: "SERVER_ERROR" } });
       await expect(module.getTrustlines(ACCOUNT_ID)).rejects.toThrow(StellarKitError);
+    });
+
+    it("passes assetCode as query param when provided", async () => {
+      mockFetch(200, { success: true, data: TRUSTLINES_DATA });
+      await module.getTrustlines(ACCOUNT_ID, { assetCode: "USDC" });
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/account/${ACCOUNT_ID}/trustlines?asset_code=USDC`,
+        expect.any(Object),
+      );
+    });
+
+    it("omits query param when assetCode is not provided", async () => {
+      mockFetch(200, { success: true, data: TRUSTLINES_DATA });
+      await module.getTrustlines(ACCOUNT_ID);
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/account/${ACCOUNT_ID}/trustlines`,
+        expect.any(Object),
+      );
+    });
+  });
+
+  // ── getPayments ───────────────────────────────────────────────────────────
+
+  describe("getPayments", () => {
+    it("calls GET /account/:id/payments and resolves data", async () => {
+      mockFetch(200, { success: true, data: PAYMENTS_DATA });
+      const data = await module.getPayments(ACCOUNT_ID);
+      expect(data.items).toHaveLength(1);
+      expect(data.total).toBe(1);
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/account/${ACCOUNT_ID}/payments`,
+        expect.any(Object),
+      );
+    });
+
+    it("passes limit and cursor as query params", async () => {
+      mockFetch(200, { success: true, data: PAYMENTS_DATA });
+      await module.getPayments(ACCOUNT_ID, { limit: 5, cursor: "abc123" });
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/account/${ACCOUNT_ID}/payments?limit=5&cursor=abc123`,
+        expect.any(Object),
+      );
+    });
+
+    it("throws StellarKitError on failure", async () => {
+      mockFetch(404, { success: false, error: { message: "Not found", type: "NOT_FOUND" } });
+      await expect(module.getPayments(ACCOUNT_ID)).rejects.toThrow(StellarKitError);
     });
   });
 
