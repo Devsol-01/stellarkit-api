@@ -1001,6 +1001,91 @@ GET /utils/memo?memo=SGVsbG8gV29ybGQ=&memo_type=text
 }
 ```
 
+### `GET /fee-estimate`
+
+Fetch fee tiers for a transaction, optionally requesting fresh Horizon data.
+
+```bash
+curl -X GET "http://localhost:3000/fee-estimate?operations=3&fresh=true"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "operationCount": 3,
+    "perOperation": {
+      "economy": { "stroops": 100, "xlm": "0.0000100" },
+      "standard": { "stroops": 200, "xlm": "0.0000200" },
+      "priority": { "stroops": 500, "xlm": "0.0000500" }
+    },
+    "totalFee": {
+      "economy": { "stroops": 300, "xlm": "0.0000300" },
+      "standard": { "stroops": 600, "xlm": "0.0000600" },
+      "priority": { "stroops": 1500, "xlm": "0.0001500" }
+    },
+    "networkStats": {
+      "lastLedgerBaseFee": 100,
+      "ledgerCapacityUsage": "0.72",
+      "p50": "200",
+      "p95": "500"
+    },
+    "recommendation": "Standard tier is recommended for moderate congestion."
+  }
+}
+```
+
+### `GET /fee-estimate/surge-status`
+
+Check whether the network is currently in a fee surge period.
+
+```bash
+curl -X GET "http://localhost:3000/fee-estimate/surge-status"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "isSurging": false,
+    "avgCapacityUsage": 0.43,
+    "ledgersAnalyzed": 10,
+    "suggestedFee": 100,
+    "suggestedFeeInXLM": "0.0000100",
+    "recommendation": "Network is operating normally with low congestion.",
+    "currentNetworkStats": {
+      "lastLedgerBaseFee": 100,
+      "ledgerCapacityUsage": "0.43",
+      "p50Fee": "200",
+      "p95Fee": "500"
+    }
+  }
+}
+```
+
+### `GET /fee-estimate/trends`
+
+Analyze fee trends across the last 50 ledgers.
+
+```bash
+curl -X GET "http://localhost:3000/fee-estimate/trends"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "ledgersAnalyzed": 50,
+    "avgBaseFee": 120.34,
+    "minBaseFee": 100,
+    "maxBaseFee": 500,
+    "avgCapacityUsage": 0.65,
+    "trend": "rising",
+    "recommendation": "Fees are trending upward. Consider submitting time-sensitive transactions soon or use the priority tier."
+  }
+}
+```
+
 ---
 
 ## Understanding Stellar Fees
