@@ -42,6 +42,7 @@ This project is ideal for:
 ## Documentation
 
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [API Design Guidelines](docs/api-design.md) — Explains StellarKit's response envelope, pagination conventions, asset shapes, timestamp formats, amount formats, and error structure.
 
 ---
 
@@ -186,12 +187,6 @@ StellarKit API currently supports Soroban contract inspection through the `/soro
 - `src/middleware/` — validation, error handling, rate limiting
 - `tests/` — API and integration tests
 - `types/index.d.ts` — exported TypeScript type definitions
-
----
-
-## Documentation
-
-- [API Design Guidelines](docs/api-design.md) — Explains StellarKit's response envelope, pagination conventions, asset shapes, timestamp formats, amount formats, and error structure.
 
 ---
 
