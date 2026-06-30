@@ -1,18 +1,15 @@
-# TODO - #396 New Endpoints | Add GET /account/:id/effects endpoint
+# TODO - Issue #397: New Endpoint GET /transaction/:hash/effects
 
-- [x] Inspect existing account routes and pagination/response/error helpers.
-- [x] Add GET /:id/effects route handler to `src/routes/account.js`:
+- [ ] Inspect existing transaction routes and response/normalization utilities
+- [ ] Implement GET /transaction/:hash/effects route
+  - [ ] Validate :hash is 64-char hex before Horizon call
+  - [ ] Fetch all effects for transaction hash via Horizon
+  - [ ] Normalize each effect with: effectId, type, account, createdAt, plus type-specific fields (best-effort)
+  - [ ] Return { success: true, data: { effects: [...], total } }
+  - [ ] Return 404 with clear message when transaction hash does not exist
+- [x] Add/Update tests for the new endpoint (shape + validation + 404 behavior)
 
-  - [x] Validate account id
-  - [x] Load account to return proper 404 if missing
-  - [x] Fetch effects history via Horizon effects endpoint
-  - [x] Apply cursor + limit query params
-  - [x] Normalize response to: { success:true, data:{ effects, total, limit, cursor } }
-  - [x] Map each effect to: { effectId, type, createdAt, ...typeSpecific }
-  - [x] Ensure all timestamps are ISO 8601 strings
+- [x] Ensure routing is registered in src/index.js (and docs list if applicable)
+- [ ] Run targeted unit tests for the endpoint only (no build)
 
-- [x] Ensure `src/index.js` root endpoint list is updated with the new route entry (optional but recommended).
 
-- [x] Add/adjust tests for the endpoint under `tests/`.
-
-- [ ] Run tests (do not build/run dev server per instructions).
