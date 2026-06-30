@@ -236,6 +236,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/account/:id/age", description: "Account age and longevity metrics" },
         { method: "GET", path: "/account/:id/balances", description: "XLM and asset balances for an account" },
         { method: "GET", path: "/account/:id/sequence", description: "Current sequence number for an account" },
+        { method: "GET", path: "/account/:id/trades", description: "Trade history for an account with pagination" },
         { method: "GET", path: "/account/:id/freeze-status/:assetCode/:assetIssuer", description: "Check if an asset is frozen on an account" },
         { method: "GET", path: "/account/:id/can-receive/:assetCode/:assetIssuer", description: "Check if an account can receive a specific asset" },
         { method: "POST", path: "/account/:id/multisig-plan", description: "Plan multisig transactions by calculating signer combinations for each threshold" },
@@ -256,6 +257,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/network/validators", description: "Normalised network validator / ledger info" },
         { method: "GET", path: "/network/ledger-timing", description: "Analyze network ledger close time consistency" },
         { method: "GET", path: "/network/validators", description: "Current validator list grouped by organisation" },
+        { method: "GET", path: "/liquidity-pools/:id/trades", description: "Trade history for a liquidity pool" },
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
 
         { method: "GET", path: "/dex/price/:sellAsset/:buyAsset", description: "Calculate effective exchange rate via best DEX payment path" },

@@ -13,6 +13,8 @@
  *   CACHE_TTL_VALIDATORS_MS      — /network/validators        (default: 300 000 ms)
  *   CACHE_TTL_ASSET_MS           — /asset/:code/:issuer       (default: 30 000 ms)
  *   CACHE_TTL_ASSET_PRICE_MS     — /asset price endpoint      (default: 5 000 ms)
+ *   CACHE_TTL_TRADES_MS          — /account/:id/trades        (default: 15 000 ms)
+ *   CACHE_TTL_POOL_TRADES_MS     — /liquidity-pools/:id/trades (default: 30 000 ms)
  *
  * The legacy CACHE_TTL_MS variable is still respected as a global fallback so
  * existing deployments are not broken.
@@ -60,6 +62,18 @@ const cacheTTL = {
   assetPrice: msToSeconds(
     process.env.CACHE_TTL_ASSET_PRICE_MS,
     globalFallbackMs
+  ),
+
+  /** /account/:id/trades */
+  trades: msToSeconds(
+    process.env.CACHE_TTL_TRADES_MS,
+    15000
+  ),
+
+  /** /liquidity-pools/:id/trades */
+  poolTrades: msToSeconds(
+    process.env.CACHE_TTL_POOL_TRADES_MS,
+    30000
   ),
 };
 
