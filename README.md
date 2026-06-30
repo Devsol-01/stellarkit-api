@@ -42,6 +42,7 @@ This project is ideal for:
 ## Documentation
 
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [TypeScript SDK Reference](docs/sdk.md) — Installation, initialisation, and every SDK method across account, dex, fees, and network modules
 - [API Design Guidelines](docs/api-design.md) — Explains StellarKit's response envelope, pagination conventions, asset shapes, timestamp formats, amount formats, and error structure.
 
 ---

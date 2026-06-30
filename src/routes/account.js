@@ -337,6 +337,73 @@ router.get("/:id/payments", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/trades
+ */
+router.get("/:id/trades", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const fresh = req.query.fresh === "true";
+    const normalizedCursor = cursor || "";
+    const cacheKey = `account-trades:${id}:${limit}:${order}:${normalizedCursor}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    let query = server.trades().forAccount(id).limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+
+    const tradeResponse = await query.call();
+    const records = tradeResponse.records || [];
+
+    const trades = records.map((trade) => ({
+      id: trade.id,
+      pagingToken: trade.paging_token,
+      ledgerCloseTime: toISOTimestamp(trade.ledger_close_time),
+      offerId: trade.offer_id,
+      tradeType: trade.base_is_seller ? "sell" : "buy",
+      baseAccount: trade.base_account,
+      baseAmount: trade.base_amount,
+      baseAssetType: trade.base_asset_type,
+      baseAssetCode: trade.base_asset_code || "XLM",
+      baseAssetIssuer: trade.base_asset_issuer || null,
+      counterAccount: trade.counter_account,
+      counterAmount: trade.counter_amount,
+      counterAssetType: trade.counter_asset_type,
+      counterAssetCode: trade.counter_asset_code || "XLM",
+      counterAssetIssuer: trade.counter_asset_issuer || null,
+      priceNumerator: trade.price?.n || null,
+      priceDenominator: trade.price?.d || null,
+      baseIsSeller: trade.base_is_seller === true,
+    }));
+
+    const nextCursor = records.length
+      ? records[records.length - 1].paging_token || null
+      : null;
+
+    const data = {
+      items: trades,
+      total: trades.length,
+      limit,
+      cursor: trades.length ? nextCursor : null,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.trades);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/offers
  */
 router.get("/:id/offers", async (req, res, next) => {
