@@ -508,6 +508,14 @@ Returns a compact account summary suitable for dashboards and quick views.
 
 Lists payments and asset transfers for the account.
 
+| Param | Type | Required | Default | Description |
+| ----- | ---- | -------- | ------- | ----------- |
+| `limit` | integer | No | `20` | Maximum number of payment records to return per page. |
+| `cursor` | string | No | None | Horizon pagination cursor from a previous response. |
+| `order` | string | No | `desc` | Sort order for results: `asc` or `desc`. |
+| `assetCode` | string | No | None | Case-insensitive asset code filter that matches all issuers for that code. |
+| `assetIssuer` | string | No | None | Asset issuer filter used only when `assetCode` is also provided; by itself it has no effect. |
+
 ### `GET /transactions/:id`
 
 Retrieves transaction history for an account, with pagination.
